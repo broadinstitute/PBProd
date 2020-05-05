@@ -11,6 +11,7 @@ import sys
 sys.path.append('/lrma')
 from ssw import ssw_lib
 
+# TODO: These globals are set by input args.  This is a bad hack.
 BARCODE_LENGTH = 16
 UMI_LENGTH = 12
 POLY_T_LENGTH = 10
@@ -19,6 +20,11 @@ ADAPTER_TAG = 'ZA'
 BARCODE_TAG = 'CB'
 RAW_BARCODE_TAG = 'CR'
 UMI_TAG = 'ZU'
+
+ADAPTER_POS_TAG = "XA"
+BARCODE_POS_TAG = "XB"
+UMI_POS_TAG = "XU"
+
 
 def read_barcodes(barcodes_filename):
     """
@@ -81,7 +87,6 @@ def check_poly_t_ratio(sequence, umi_position):
         return None
     estimated_poly_t = sequence[umi_position + UMI_LENGTH:umi_position + UMI_LENGTH + POLY_T_LENGTH]
     return estimated_poly_t.count('T') / POLY_T_LENGTH
-
 
 
 class AnalysisStats:
@@ -234,6 +239,7 @@ def to_int(seq, lEle, dEle2Int):
 
     return num
 
+
 def get_alignment(ssw, sequence, adapter_sequence, alphabet, letter_to_int, mat, open_penalty=2, extension_penalty=1):
     """
     Performs the alignment of the read end to the adapter sequence
@@ -245,7 +251,7 @@ def get_alignment(ssw, sequence, adapter_sequence, alphabet, letter_to_int, mat,
     :param mat: The match-mismatch score matrix for the ssw algorithm
     :param open_penalty: The penalty for opening gaps in the alignment
     :param extension_penalty: The penalty for extending gaps
-    :return: The position of the last base of the adapter sequence in the read end
+    :return: A tuple containing the position of the first and last base of the adapter sequence in the read end
     """
     sequence_numbers = to_int(sequence, alphabet, letter_to_int)
     adapter_numbers = to_int(adapter_sequence, alphabet, letter_to_int)
@@ -253,11 +259,12 @@ def get_alignment(ssw, sequence, adapter_sequence, alphabet, letter_to_int, mat,
     flag = 1
     mask_length = len(adapter_sequence) // 2 if len(adapter_sequence) >= 30 else 15
 
-    qProfile = ssw.ssw_init(sequence_numbers, ctypes.c_int32(len(sequence)), mat, len(alphabet), 2)
+    q_profile = ssw.ssw_init(sequence_numbers, ctypes.c_int32(len(sequence)), mat, len(alphabet), 2)
 
-    res = ssw.ssw_align(qProfile, adapter_numbers, ctypes.c_int32(len(adapter_sequence)), open_penalty, extension_penalty, flag, 0, 0, mask_length)
+    res = ssw.ssw_align(q_profile, adapter_numbers, ctypes.c_int32(len(adapter_sequence)), open_penalty,
+                        extension_penalty, flag, 0, 0, mask_length)
 
-    return res.contents.nQryEnd if res.contents.nScore > 30 else None
+    return (res.contents.nQryBeg, res.contents.nQryEnd) if res.contents.nScore > 30 else None
 
 
 def align(read, stats, ssw, alphabet, letter_to_int, mat, read_end_length, adapter_sequence, tso_sequence):
@@ -269,64 +276,74 @@ def align(read, stats, ssw, alphabet, letter_to_int, mat, read_end_length, adapt
     :param alphabet: The alphabet object for the ssw algorithm
     :param letter_to_int: The dict to convert base letters to numbers
     :param mat: The match-mismatch score matrix for the ssw algorithm
-    :param read_end_length: Length of the read end that must include the adapter, barcode, UMI, and poly-T tail (recommended for PacBio: 80, recommended for Oxford Nanopore: 250)
+    :param read_end_length: Length of the read end that must include the adapter, barcode, UMI, and poly-T tail
+                            (recommended for PacBio: 80, recommended for Oxford Nanopore: 250)
     :param adapter_sequence: The adapter sequence to align to
     :param tso_sequence: The TSO sequence to align to
-    :return: The sequence of the read end that the adapter was found in, the position of the last base of the adapter sequence in the read end
+    :return: The sequence of the read end that the adapter was found in,
+             the position of the first base of the adapter sequence in the read end,
+             the position of last base of the adapter sequence in the read end
     """
+
+    # Only perform an alignment if we have a sequence to align:
+    if read.seq is None:
+        return None, None
+
     read_seq = read.seq
     read_seq_reversed = str(Seq(read_seq).reverse_complement())
     five_prime_end = read_seq[:read_end_length]
     three_prime_end_reversed = read_seq_reversed[:read_end_length]
 
-    five_prime_alignment_end = get_alignment(ssw, five_prime_end, adapter_sequence, alphabet, letter_to_int, mat)
-    three_prime_alignment_end = get_alignment(ssw, three_prime_end_reversed, adapter_sequence, alphabet, letter_to_int, mat)
+    five_prime_alignments = get_alignment(ssw, five_prime_end, adapter_sequence, alphabet, letter_to_int, mat)
+    three_prime_alignments = get_alignment(ssw, three_prime_end_reversed, adapter_sequence, alphabet, letter_to_int, mat)
 
-    five_prime_tso_alignment_end = get_alignment(ssw, five_prime_end, tso_sequence, alphabet, letter_to_int, mat)
-    three_prime_tso_alignment_end = get_alignment(ssw, three_prime_end_reversed, tso_sequence, alphabet, letter_to_int, mat)
+    five_prime_tso_alignments = get_alignment(ssw, five_prime_end, tso_sequence, alphabet, letter_to_int, mat)
+    three_prime_tso_alignments = get_alignment(ssw, three_prime_end_reversed, tso_sequence, alphabet, letter_to_int, mat)
 
-    if five_prime_alignment_end is None and three_prime_alignment_end is None:
+    if five_prime_alignments is None and three_prime_alignments is None:
         stats.adapter_not_found += 1
 
-        if five_prime_tso_alignment_end:
-            if three_prime_tso_alignment_end:
+        if five_prime_tso_alignments:
+            if three_prime_tso_alignments:
                 stats.both_tsos_in_not_found += 1
             else:
                 stats.forward_tso_in_not_found += 1
-        elif three_prime_tso_alignment_end:
+        elif three_prime_tso_alignments:
             stats.reverse_tso_in_not_found += 1
-        return None, None
+        return tuple([None]*3)
 
-    if five_prime_alignment_end and three_prime_alignment_end:
+    if five_prime_alignments and three_prime_alignments:
         stats.adapter_in_both_ends += 1
-        return None, None
+        return tuple([None]*3)
 
-    if five_prime_alignment_end:
-        alignment_end = five_prime_alignment_end
+    if five_prime_alignments:
+        alignment_start = five_prime_alignments[0]
+        alignment_end = five_prime_alignments[1]
         sequence = read_seq
 
-        if five_prime_tso_alignment_end:
-            if three_prime_tso_alignment_end:
+        if five_prime_tso_alignments:
+            if three_prime_tso_alignments:
                 stats.both_tsos_in_forward_found += 1
             else:
                 stats.forward_tso_in_forward_found += 1
-        elif three_prime_tso_alignment_end:
+        elif three_prime_tso_alignments:
             stats.reverse_tso_in_forward_found += 1
     else:
-        alignment_end = three_prime_alignment_end
+        alignment_start = three_prime_alignments[0]
+        alignment_end = three_prime_alignments[1]
         sequence = read_seq_reversed
 
-        if five_prime_tso_alignment_end:
-            if three_prime_tso_alignment_end:
+        if five_prime_tso_alignments:
+            if three_prime_tso_alignments:
                 stats.both_tsos_in_reverse_found += 1
             else:
                 stats.forward_tso_in_reverse_found += 1
-        elif three_prime_tso_alignment_end:
+        elif three_prime_tso_alignments:
             stats.reverse_tso_in_reverse_found += 1
 
     # Valid adapter found
     stats.adapter_found += 1
-    return sequence, alignment_end
+    return sequence, alignment_start, alignment_end
 
 
 def process_barcode(sequence, adapter_alignment_end, stats, whitelist_10x, whitelist_illumina):
@@ -337,7 +354,10 @@ def process_barcode(sequence, adapter_alignment_end, stats, whitelist_10x, white
     :param stats: The AnalysisStats object
     :param whitelist_10x: Whitelist provided by 10x. Can be None, unless whitelist_illumina is None.
     :param whitelist_illumina: Whitelist provided by short read sequencing. Can be None
-    :return: The raw barcode sequence, the position of the first read of the barcode in the read end sequence, whether or not the barcode is present in the 10x whitelist, whether or not the barcode is present in the Illumina whitelist
+    :return: The raw barcode sequence,
+             the position of the first read of the barcode in the read end sequence,
+             whether or not the barcode is present in the 10x whitelist,
+             whether or not the barcode is present in the Illumina whitelist
     """
     barcode, barcode_position = find_barcode(sequence, adapter_alignment_end)
 
@@ -390,7 +410,8 @@ def process_umi(sequence, barcode_position, stats):
 
 def process_poly_t(sequence, umi_position, stats):
     """
-    Checks if the poly-T tail is present by testing if the ratio of Ts in the section of a certain length in the read end after the UMI is greater than a given number.
+    Checks if the poly-T tail is present by testing if the ratio of Ts in the section of a certain length in the read
+    end after the UMI is greater than a given number.
     :param sequence: The sequence of the read end
     :param umi_position: The position of the first base of the UMI in the read end
     :param stats: The AnalysisStats object
@@ -411,7 +432,8 @@ def process_poly_t(sequence, umi_position, stats):
 def perform_barcode_correction_starcode(observed_barcodes, analysis_name, starcode_path, stats=None):
     """
     Performs the barcode correction using starcode
-    :param observed_barcodes: dict of observed barcodes with the barcode sequences as keys and the number of observations as values
+    :param observed_barcodes: dict of observed barcodes with the barcode sequences as keys and the number of
+    observations as values
     :param analysis_name: Prefix for the stats files
     :param starcode_path: Relative or absolute path to the starcode executable
     :param stats: The AnalysisStats file
@@ -495,8 +517,7 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
             stats = AnalysisStats()
 
             observed_barcodes = dict()
-            if record_umis:
-                observed_barcodes_umis = dict()
+            observed_barcodes_umis = dict()
 
             last_timing = time.time()
             reads_seen = 0
@@ -514,12 +535,19 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
 
                 stats.reads_seen += 1
 
-                sequence, adapter_alignment_end = align(read, stats, ssw, alphabet, letter_to_int, mat, read_end_length, adapter_sequence, tso_sequence)
+                sequence, adapter_alignment_start, adapter_alignment_end = align(
+                    read, stats, ssw, alphabet, letter_to_int, mat, read_end_length, adapter_sequence, tso_sequence
+                )
 
                 if sequence is None or adapter_alignment_end is None:
                     read.set_tag(ADAPTER_TAG, ".", value_type='Z')
                     read.set_tag(RAW_BARCODE_TAG, ".", value_type='Z')
                     read.set_tag(UMI_TAG, ".", value_type='Z')
+
+                    read.set_tag(ADAPTER_POS_TAG, ".", value_type='Z')
+                    read.set_tag(BARCODE_POS_TAG, ".", value_type='Z')
+                    read.set_tag(UMI_POS_TAG, ".", value_type='Z')
+
                     intermediate_file.write(read)
 
                     continue
@@ -530,6 +558,15 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
                     read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
                     read.set_tag(RAW_BARCODE_TAG, ".", value_type='Z')
                     read.set_tag(UMI_TAG, ".", value_type='Z')
+
+                    read.set_tag(
+                        ADAPTER_POS_TAG,
+                        ",".join([str(adapter_alignment_start), str(adapter_alignment_end)]),
+                        value_type='Z'
+                    )
+                    read.set_tag(BARCODE_POS_TAG, ".", value_type='Z')
+                    read.set_tag(UMI_POS_TAG, ".", value_type='Z')
+
                     intermediate_file.write(read)
 
                     continue
@@ -542,6 +579,19 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
                     read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
                     read.set_tag(RAW_BARCODE_TAG, observed_barcode, value_type='Z')
                     read.set_tag(UMI_TAG, ".", value_type='Z')
+
+                    read.set_tag(
+                        ADAPTER_POS_TAG,
+                        ",".join([str(adapter_alignment_start), str(adapter_alignment_end)]),
+                        value_type='Z'
+                    )
+                    read.set_tag(
+                        BARCODE_POS_TAG,
+                        ",".join([str(observed_barcode_position), str(observed_barcode_position + BARCODE_LENGTH)]),
+                        value_type='Z'
+                    )
+                    read.set_tag(UMI_POS_TAG, ".", value_type='Z')
+
                     intermediate_file.write(read)
 
                     continue
@@ -556,6 +606,23 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
                 read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
                 read.set_tag(RAW_BARCODE_TAG, observed_barcode, value_type='Z')
                 read.set_tag(UMI_TAG, observed_umi, value_type='Z')
+
+                read.set_tag(
+                    ADAPTER_POS_TAG,
+                    ",".join([str(adapter_alignment_start), str(adapter_alignment_end)]),
+                    value_type='Z'
+                )
+                read.set_tag(
+                    BARCODE_POS_TAG,
+                    ",".join([str(observed_barcode_position), str(observed_barcode_position + BARCODE_LENGTH)]),
+                    value_type='Z'
+                )
+                read.set_tag(
+                    UMI_POS_TAG,
+                    ",".join([str(observed_umi_position), str(observed_umi_position + UMI_LENGTH)]),
+                    value_type='Z'
+                )
+
                 intermediate_file.write(read)
 
     print('Performing barcode corrections...')
@@ -633,10 +700,16 @@ def correct_barcodes(observed_barcodes, analysis_name, stats, whitelist_10x, whi
 
                 output_file.write(read)
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Reads an input BAM file and tries to extract adapter and barcode sequences. When found, annotated reads are written to an output file, if an output filename is provided',
-        epilog='Two barcode whitelists can be provided: a 10x whitelist and an Illumina whitelist. If both whitelists are provided, reads will only be annotated if the barcode matches the Illumina list. If only a 10x whitelist is provided, reads will be annotated if the barcode matches the 10x list. In any case, reads will be annotated with the "raw barcode" tag (CR). If no whitelist is provided, all reads will be annotated with the barcode tage (CB) after correction.')
+        description='Reads an input BAM file and tries to extract adapter and barcode sequences. '
+                    'When found, annotated reads are written to an output file, if an output filename is provided',
+        epilog='Two barcode whitelists can be provided: a 10x whitelist and an Illumina whitelist. '
+               'If both whitelists are provided, reads will only be annotated if the barcode matches the Illumina list.'
+               ' If only a 10x whitelist is provided, reads will be annotated if the barcode matches the 10x list. '
+               'In any case, reads will be annotated with the "raw barcode" tag (CR). If no whitelist is provided, '
+               'all reads will be annotated with the barcode tage (CB) after correction.')
     requiredNamed = parser.add_argument_group('required named arguments')
     requiredNamed.add_argument('-b', '--bam', help='BAM filename', required=True)
     requiredNamed.add_argument('-a', '--adapter', help='Adapter FASTA filename. BWA index must be present.', required=True)
@@ -651,10 +724,40 @@ if __name__ == '__main__':
     parser.add_argument('--ssw-path', help='Path to the Striped Smith-Waterman library', type=str, default='/lrma/ssw')
     parser.add_argument('--starcode-path', help='Path to the starcode executable', type=str, default='/lrma/starcode-master/starcode')
 
+    # User-defined length for the marker segments:
+    parser.add_argument(
+        '--poly-t-length', help='Expected length of the poly-T section of the read.', type=int,
+        default=POLY_T_LENGTH
+    )
+    parser.add_argument(
+        '--barcode-length', help='Length of the cell barcode used in the library prep.', type=int,
+        default=BARCODE_LENGTH
+    )
+    parser.add_argument(
+        '--umi-length', help='Length of the unique molecular identifier used in the library prep.', type=int,
+        default=UMI_LENGTH
+    )
+
     args = parser.parse_args()
 
     if args.whitelist_illumina and not args.whitelist_10x:
         print('Illumina whitelist provided but no 10x whitelist provided.')
         exit(1)
 
-    main(args.bam, args.name, args.adapter, args.reverse_adapter, args.whitelist_10x, args.whitelist_illumina, args.max_reads, args.contig, args.read_end_length, args.record_umis, args.ssw_path, args.starcode_path)
+    # TODO: This is a BAD HACK - we should probably propagate these values through method calls
+    # Set Poly-T length here:
+    if args.poly_t_length:
+        POLY_T_LENGTH = args.poly_t_length
+
+    # Set barcode length here:
+    # NOTE: This is a bad hack.
+    if args.barcode_length:
+        BARCODE_LENGTH = args.barcode_length
+
+    # Set UMI length here:
+    if args.umi_length:
+        UMI_LENGTH = args.umi_length
+
+    main(args.bam, args.name, args.adapter, args.reverse_adapter, args.whitelist_10x, args.whitelist_illumina,
+         args.max_reads, args.contig, args.read_end_length, args.record_umis, args.ssw_path, args.starcode_path)
+

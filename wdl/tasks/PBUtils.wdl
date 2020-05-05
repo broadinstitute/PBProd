@@ -13,8 +13,7 @@ task FindBams {
 
     command <<<
         set -euxo pipefail
-
-        gsutil ls ~{indir}/**subreads.bam > subread_bams.txt
+        gsutil ls ~{indir}/**subreads.bam | sort > subread_bams.txt
     >>>
 
     output {
@@ -47,16 +46,23 @@ task GetRunInfo {
     input {
         String subread_bam
 
+        String? bam_suffix
+
         RuntimeAttr? runtime_attr_override
     }
 
     String gcs_dir = sub(subread_bam, basename(subread_bam), "")
 
+    String bam_suffix_arg = if defined(bam_suffix) then " --BS " else ""
+
     command <<<
         set -x
 
         export GCS_OAUTH_TOKEN=`gcloud auth application-default print-access-token`
-        python /usr/local/bin/detect_run_info.py ~{gcs_dir} > run_info.txt
+
+        # We need to update detect_run_info.py to make it sanitize fields.
+        # The `sed` statement here is a hack to get around an issue.
+        python /usr/local/bin/detect_run_info.py ~{gcs_dir} ~{bam_suffix_arg}~{default="" sep=" --BS " bam_suffix} | sed 's#\\$##' > run_info.txt
     >>>
 
     output {
@@ -149,12 +155,12 @@ task CCS {
         Float min_rq = 0.99
         Boolean by_strand = false
 
-        Int cpus = 4
+        Int disk_space_scale_factor = 2
 
         RuntimeAttr? runtime_attr_override
     }
 
-    Int disk_size = 2*ceil(size(subreads, "GB"))
+    Int disk_size = disk_space_scale_factor*ceil(size(subreads, "GB"))
 
     command <<<
         set -euxo pipefail
@@ -164,13 +170,17 @@ task CCS {
         infile=$( basename ~{subreads} )
         mv ~{subreads} $infile
 
+        # Get the number of processors we're runnign with:
+        num_procs=$(cat /proc/cpuinfo | grep processor | awk '{print $NF}' | sort -n | tail -n1)
+        let num_procs=$num_procs+1
+
         # Run CCS:
         ccs --min-passes ~{min_passes} \
             --min-snr ~{min_snr} \
             --min-length ~{min_length} \
             --max-length ~{max_length} \
             --min-rq ~{min_rq} \
-            --num-threads ~{cpus} \
+            --num-threads $num_procs \
             --report-file ccs_report.txt \
             ~{if by_strand then "--by-strand" else ""} $infile ccs_unmapped.bam
     >>>
@@ -182,7 +192,7 @@ task CCS {
 
     #########################
     RuntimeAttr default_attr = object {
-        cpu_cores:          cpus,
+        cpu_cores:          4,
         mem_gb:             8,
         disk_gb:            disk_size,
         boot_disk_gb:       10,
@@ -722,3 +732,149 @@ task CollapseTranscripts {
     }
 }
 
+task CollectZmwSubreadStats {
+    input {
+        File subreads
+        String prefix = "zmw_subread_stats"
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Int disk_size = 2*ceil(size(subreads, "GB"))
+
+    command <<<
+        set -euxo pipefail
+
+        python3 /usr/local/bin/collect_zmw_subread_stats.py -o ~{prefix}.tsv -b ~{subreads}
+    >>>
+
+    output {
+        File zmw_subread_stats = "~{prefix}.tsv"
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          4,             # Decent amount of CPU and Memory because network transfer speed is proportional to VM "power"
+        mem_gb:             8,
+        disk_gb:            disk_size,
+        boot_disk_gb:       10,
+        preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-pb:0.1.24.1"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}
+
+task CollectPolymeraseReadLengths {
+    input {
+        String gcs_input_dir
+        File subreads
+        String prefix = "polymerase_read_lengths"
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    String indir = sub(gcs_input_dir, "/$", "")
+    Int disk_size = 2*ceil(size(subreads, "GB"))
+
+    command <<<
+        set -euxo pipefail
+
+        # Find our corresponding scraps file:
+        subreads_base_name=$( basename ~{subreads} | sed 's#.subreads.bam$##' )
+        gsutil ls ~{gcs_input_dir}/**scraps.bam | grep "$subreads_base_name" > scraps_file_name.txt
+        if [[ $( wc -l scraps_file_name.txt | awk '{print $1}' ) -ne 1 ]] ; then
+            echo "ERROR: Cannot match scraps file to given subreads file: $subreads_base_name" 1>&2
+            echo "       Multiple files returned:" 1>&2
+            cat scraps_file_name.txt 1>&2
+            return 1
+        fi
+
+        # Localize the scraps so we can read them:
+        remote_scraps="$(head -n1 scraps_file_name.txt)"
+        local_scraps="$(basename $remote_scraps)"
+        echo "Localizing scraps: $remote_scraps -> $local_scraps"
+        gsutil -m cp $remote_scraps .
+
+        # Calculate our polymerase read lengths:
+        python3 /usr/local/bin/collect_polymerase_read_lengths.py -o ~{prefix}.tsv -s ~{subreads} -p $local_scraps
+    >>>
+
+    output {
+        File polymerase_read_lengths_tsv = "~{prefix}.tsv"
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          4,             # Decent amount of CPU and Memory because network transfer speed is proportional to VM "power"
+        mem_gb:             8,
+        disk_gb:            disk_size,
+        boot_disk_gb:       10,
+        preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-pb:0.1.24.1"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}
+
+task PBIndex {
+    input {
+        File bam
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Int disk_size = 2*ceil(size(bam, "GB"))
+
+    String base_name = basename(bam)
+
+    command <<<
+        set -euxo pipefail
+
+        # Run PBIndex:
+        pbindex ~{bam}
+        mv ~{bam}.pbi ~{base_name}.pbi
+    >>>
+
+    output {
+        File pbindex = "~{base_name}.pbi"
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,             # Decent amount of CPU and Memory because network transfer speed is proportional to VM "power"
+        mem_gb:             4,
+        disk_gb:            disk_size,
+        boot_disk_gb:       10,
+        preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-pb:0.1.21"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}

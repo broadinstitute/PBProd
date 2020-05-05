@@ -23,15 +23,25 @@ task Minimap2 {
         prefix:     "[default-valued] prefix for output BAM"
     }
 
-    Int disk_size = 1 + 10*ceil(size(reads, "GB") + size(ref_fasta, "GB"))
+    # 10x for the decompressed file size
+    # 2x for potential for FASTQ and SAM files (from file conversion).
+    # 2x for extra "just in case" space.
+    # +1 to handle small files
+    Int disk_size = 1 + 10*2*2*ceil(size(reads, "GB") + size(ref_fasta, "GB"))
 
     Int cpus = 4
     Int mem = 30
 
-    command <<<
+    command {
         set -euxo pipefail
 
-        MAP_PARAMS="-ayYL --MD --eqx -x ~{map_preset} -R ~{RG} -t ~{cpus} ~{ref_fasta}"
+        # Sometimes we have to sanitize our read groups:
+        sanitized_read_group=$( echo "~{RG}" | sed -e 's# .*##g' | sed 's#\t.*##g' )
+
+        echo "Original Read Group: ~{RG}"
+        echo "Sanitized Read Group: $sanitized_read_group"
+
+        MAP_PARAMS="-ayYL --MD --eqx -x ~{map_preset} -R $sanitized_read_group -t ~{cpus} ~{ref_fasta}"
         FILE="~{reads[0]}"
         FILES="~{sep=' ' reads}"
 
@@ -48,7 +58,17 @@ task Minimap2 {
         elif [[ "$FILE" =~ \.fasta.gz$ ]] || [[ "$FILE" =~ \.fa.gz$ ]]; then
             zcat $FILES | python3 /usr/local/bin/cat_as_fastq.py | minimap2 $MAP_PARAMS - > tmp.sam
         elif [[ "$FILE" =~ \.bam$ ]]; then
-            samtools fastq $FILES | minimap2 $MAP_PARAMS - > tmp.sam
+
+            # samtools fastq takes only 1 file at a time so we need to merge them together:
+            for f in "~{sep=' ' reads}" ; do
+                samtools fastq "$f"
+            done > tmp.fastq
+
+            echo "Memory info:"
+            cat /proc/meminfo
+            echo ""
+
+            minimap2 $MAP_PARAMS tmp.fastq > tmp.sam
         else
             echo "Did not understand file format for '$FILE'"
             exit 1
@@ -56,7 +76,7 @@ task Minimap2 {
 
         samtools sort -@~{cpus} -m~{mem}G --no-PG -o ~{prefix}.bam tmp.sam
         samtools index ~{prefix}.bam
-    >>>
+    }
 
     output {
         File aligned_bam = "~{prefix}.bam"

@@ -51,16 +51,16 @@ workflow AlignedMetrics {
 
     call FilterMQ0Reads { input: bam = aligned_bam }
 
-#    call CollectSamErrorMetrics {
-#        input:
-#            bam = aligned_bam,
-#            bai = aligned_bai,
-#            ref_fasta = ref_fasta,
-#            ref_dict = ref_dict,
-#            dbsnp_vcf = dbsnp_vcf,
-#            dbsnp_tbi = dbsnp_tbi,
-#            region = metrics_locus,
-#    }
+    call CollectSamErrorMetrics {
+        input:
+            bam = aligned_bam,
+            bai = aligned_bai,
+            ref_fasta = ref_fasta,
+            ref_dict = ref_dict,
+            dbsnp_vcf = dbsnp_vcf,
+            dbsnp_tbi = dbsnp_tbi,
+            region = metrics_locus,
+    }
 
     if (defined(gcs_output_dir)) {
         String outdir = sub(gcs_output_dir + "", "/$", "") + "/metrics/~{per}_~{type}_~{label}"
@@ -98,41 +98,38 @@ workflow AlignedMetrics {
         call FF.FinalizeToDir as FFRnaSeqMetrics { input: outdir = outdir + "/rnaseq/", files = [ RnaSeqMetrics.rna_metrics ] }
         call FF.FinalizeToDir as FFReadNamesAndLengths { input: outdir = outdir + "/read_names_and_lengths/", files = [ ReadNamesAndLengths.read_names_and_lengths ] }
 
-#        call FF.FinalizeToDir as FFBedCoverages { input: outdir = outdir + "/coverage_over_beds/", files = ComputeBedCoverage.coverage }
-#        call FF.FinalizeToDir as FFBedCoverageCounts { input: outdir = outdir + "/coverage_over_beds/", files = ComputeBedCoverage.counts_file }
-
-#        call FF.FinalizeToDir as FFErrorStats {
-#            input:
-#                outdir = outdir + "/error_rate/",
-#                files = [
-#                    CollectSamErrorMetrics.error_by_all,
-#                    CollectSamErrorMetrics.error_by_base_quality,
-#                    CollectSamErrorMetrics.error_by_binned_length_homopolymer_and_following_ref_base,
-#                    CollectSamErrorMetrics.error_by_cycle,
-#                    CollectSamErrorMetrics.error_by_gc,
-#                    CollectSamErrorMetrics.error_by_homopolymer_and_following_ref_base,
-#                    CollectSamErrorMetrics.error_by_insert_length,
-#                    CollectSamErrorMetrics.error_by_mapping_quality,
-#                    CollectSamErrorMetrics.error_by_mismatches_in_read,
-#                    CollectSamErrorMetrics.error_by_one_base_padded_context,
-#                    CollectSamErrorMetrics.error_by_pair_orientation,
-#                    CollectSamErrorMetrics.error_by_read_direction,
-#                    CollectSamErrorMetrics.error_by_read_group,
-#                    CollectSamErrorMetrics.error_by_read_ordinality,
-#                    CollectSamErrorMetrics.error_by_read_ordinality_and_cycle,
-#                    CollectSamErrorMetrics.error_by_read_ordinality_and_gc,
-#                    CollectSamErrorMetrics.error_by_read_ordinality_and_homopolymer_and_following_ref_base,
-#                    CollectSamErrorMetrics.error_by_read_ordinality_and_pre_dinuc,
-#                    CollectSamErrorMetrics.indel_error_by_all,
-#                    CollectSamErrorMetrics.overlapping_error_by_all,
-#                    CollectSamErrorMetrics.overlapping_error_by_base_quality,
-#                    CollectSamErrorMetrics.overlapping_error_by_insert_length,
-#                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality,
-#                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_cycle,
-#                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_gc,
-#                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_homopolymer_and_following_ref_base
-#                ]
-#        }
+        call FF.FinalizeToDir as FFErrorStats {
+            input:
+                outdir = outdir + "/error_rate/",
+                files = [
+                    CollectSamErrorMetrics.error_by_all,
+                    CollectSamErrorMetrics.error_by_base_quality,
+                    CollectSamErrorMetrics.error_by_binned_length_homopolymer_and_following_ref_base,
+                    CollectSamErrorMetrics.error_by_cycle,
+                    CollectSamErrorMetrics.error_by_gc,
+                    CollectSamErrorMetrics.error_by_homopolymer_and_following_ref_base,
+                    CollectSamErrorMetrics.error_by_insert_length,
+                    CollectSamErrorMetrics.error_by_mapping_quality,
+                    CollectSamErrorMetrics.error_by_mismatches_in_read,
+                    CollectSamErrorMetrics.error_by_one_base_padded_context,
+                    CollectSamErrorMetrics.error_by_pair_orientation,
+                    CollectSamErrorMetrics.error_by_read_direction,
+                    CollectSamErrorMetrics.error_by_read_group,
+                    CollectSamErrorMetrics.error_by_read_ordinality,
+                    CollectSamErrorMetrics.error_by_read_ordinality_and_cycle,
+                    CollectSamErrorMetrics.error_by_read_ordinality_and_gc,
+                    CollectSamErrorMetrics.error_by_read_ordinality_and_homopolymer_and_following_ref_base,
+                    CollectSamErrorMetrics.error_by_read_ordinality_and_pre_dinuc,
+                    CollectSamErrorMetrics.indel_error_by_all,
+                    CollectSamErrorMetrics.overlapping_error_by_all,
+                    CollectSamErrorMetrics.overlapping_error_by_base_quality,
+                    CollectSamErrorMetrics.overlapping_error_by_insert_length,
+                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality,
+                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_cycle,
+                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_gc,
+                    CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_homopolymer_and_following_ref_base
+                ]
+        }
     }
 
     output {
@@ -161,32 +158,32 @@ workflow AlignedMetrics {
 
         File rna_metrics = RnaSeqMetrics.rna_metrics
 
-#        File error_by_all = CollectSamErrorMetrics.error_by_all
-#        File error_by_base_quality = CollectSamErrorMetrics.error_by_base_quality
-#        File error_by_binned_length_homopolymer_and_following_ref_base = CollectSamErrorMetrics.error_by_binned_length_homopolymer_and_following_ref_base
-#        File error_by_cycle = CollectSamErrorMetrics.error_by_cycle
-#        File error_by_gc = CollectSamErrorMetrics.error_by_gc
-#        File error_by_homopolymer_and_following_ref_base = CollectSamErrorMetrics.error_by_homopolymer_and_following_ref_base
-#        File error_by_insert_length = CollectSamErrorMetrics.error_by_insert_length
-#        File error_by_mapping_quality = CollectSamErrorMetrics.error_by_mapping_quality
-#        File error_by_mismatches_in_read = CollectSamErrorMetrics.error_by_mismatches_in_read
-#        File error_by_one_base_padded_context = CollectSamErrorMetrics.error_by_one_base_padded_context
-#        File error_by_pair_orientation = CollectSamErrorMetrics.error_by_pair_orientation
-#        File error_by_read_direction = CollectSamErrorMetrics.error_by_read_direction
-#        File error_by_read_group = CollectSamErrorMetrics.error_by_read_group
-#        File error_by_read_ordinality = CollectSamErrorMetrics.error_by_read_ordinality
-#        File error_by_read_ordinality_and_cycle = CollectSamErrorMetrics.error_by_read_ordinality_and_cycle
-#        File error_by_read_ordinality_and_gc = CollectSamErrorMetrics.error_by_read_ordinality_and_gc
-#        File error_by_read_ordinality_and_homopolymer_and_following_ref_base = CollectSamErrorMetrics.error_by_read_ordinality_and_homopolymer_and_following_ref_base
-#        File error_by_read_ordinality_and_pre_dinuc = CollectSamErrorMetrics.error_by_read_ordinality_and_pre_dinuc
-#        File indel_error_by_all = CollectSamErrorMetrics.indel_error_by_all
-#        File overlapping_error_by_all = CollectSamErrorMetrics.overlapping_error_by_all
-#        File overlapping_error_by_base_quality = CollectSamErrorMetrics.overlapping_error_by_base_quality
-#        File overlapping_error_by_insert_length = CollectSamErrorMetrics.overlapping_error_by_insert_length
-#        File overlapping_error_by_read_ordinality = CollectSamErrorMetrics.overlapping_error_by_read_ordinality
-#        File overlapping_error_by_read_ordinality_and_cycle = CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_cycle
-#        File overlapping_error_by_read_ordinality_and_gc = CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_gc
-#        File overlapping_error_by_read_ordinality_and_homopolymer_and_following_ref_base = CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_homopolymer_and_following_ref_base
+        File error_by_all = CollectSamErrorMetrics.error_by_all
+        File error_by_base_quality = CollectSamErrorMetrics.error_by_base_quality
+        File error_by_binned_length_homopolymer_and_following_ref_base = CollectSamErrorMetrics.error_by_binned_length_homopolymer_and_following_ref_base
+        File error_by_cycle = CollectSamErrorMetrics.error_by_cycle
+        File error_by_gc = CollectSamErrorMetrics.error_by_gc
+        File error_by_homopolymer_and_following_ref_base = CollectSamErrorMetrics.error_by_homopolymer_and_following_ref_base
+        File error_by_insert_length = CollectSamErrorMetrics.error_by_insert_length
+        File error_by_mapping_quality = CollectSamErrorMetrics.error_by_mapping_quality
+        File error_by_mismatches_in_read = CollectSamErrorMetrics.error_by_mismatches_in_read
+        File error_by_one_base_padded_context = CollectSamErrorMetrics.error_by_one_base_padded_context
+        File error_by_pair_orientation = CollectSamErrorMetrics.error_by_pair_orientation
+        File error_by_read_direction = CollectSamErrorMetrics.error_by_read_direction
+        File error_by_read_group = CollectSamErrorMetrics.error_by_read_group
+        File error_by_read_ordinality = CollectSamErrorMetrics.error_by_read_ordinality
+        File error_by_read_ordinality_and_cycle = CollectSamErrorMetrics.error_by_read_ordinality_and_cycle
+        File error_by_read_ordinality_and_gc = CollectSamErrorMetrics.error_by_read_ordinality_and_gc
+        File error_by_read_ordinality_and_homopolymer_and_following_ref_base = CollectSamErrorMetrics.error_by_read_ordinality_and_homopolymer_and_following_ref_base
+        File error_by_read_ordinality_and_pre_dinuc = CollectSamErrorMetrics.error_by_read_ordinality_and_pre_dinuc
+        File indel_error_by_all = CollectSamErrorMetrics.indel_error_by_all
+        File overlapping_error_by_all = CollectSamErrorMetrics.overlapping_error_by_all
+        File overlapping_error_by_base_quality = CollectSamErrorMetrics.overlapping_error_by_base_quality
+        File overlapping_error_by_insert_length = CollectSamErrorMetrics.overlapping_error_by_insert_length
+        File overlapping_error_by_read_ordinality = CollectSamErrorMetrics.overlapping_error_by_read_ordinality
+        File overlapping_error_by_read_ordinality_and_cycle = CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_cycle
+        File overlapping_error_by_read_ordinality_and_gc = CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_gc
+        File overlapping_error_by_read_ordinality_and_homopolymer_and_following_ref_base = CollectSamErrorMetrics.overlapping_error_by_read_ordinality_and_homopolymer_and_following_ref_base
     }
 }
 
@@ -818,6 +815,84 @@ task BamToBed {
         preemptible_tries:  2,
         max_retries:        1,
         docker:             "us.gcr.io/broad-dsp-lrma/lr-metrics:0.1.10"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}
+
+task SamtoolsStats {
+    input {
+        File bam
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Int disk_size = ceil(6 * size(bam, "GiB"))
+
+    String raw_stats_file = "raw_stats.txt"
+    String summary_stats_file = "summary_stats.txt"
+    String first_frag_qual_file = "first_fragment_quality_stats.txt"
+    String last_frag_qual_file = "last_fragment_quality_stats.txt"
+    String first_frag_gc_content_file = "first_fragment_gc_content_stats.txt"
+    String last_frag_gc_content_file = "last_fragment_gc_content_stats.txt"
+    String acgt_content_per_cycle_file = "acgt_content_per_cycle_stats.txt"
+    String insert_size_file = "insert_size_stats.txt"
+    String read_length_dist_file = "read_length_distribution.txt"
+    String indel_distribution_file = "indel_distribution.txt"
+    String indels_per_cycle_file = "indels_per_cycle_stats.txt"
+    String coverage_distribution_file = "coverage_distribution.txt"
+    String gc_depth_file = "gc_depth_stats.txt"
+
+    command <<<
+        samtools stats ~{bam} > ~{raw_stats_file}
+        grep ^SN ~{raw_stats_file} | cut -f 2-  > ~{summary_stats_file}
+        grep ^FFQ ~{raw_stats_file} | cut -f 2- > ~{first_frag_qual_file}
+        grep ^LFQ ~{raw_stats_file} | cut -f 2- > ~{last_frag_qual_file}
+        grep ^GCF ~{raw_stats_file} | cut -f 2- > ~{first_frag_gc_content_file}
+        grep ^GCL ~{raw_stats_file} | cut -f 2- > ~{last_frag_gc_content_file}
+        grep ^GCC ~{raw_stats_file} | cut -f 2- > ~{acgt_content_per_cycle_file}
+        grep ^IS ~{raw_stats_file} | cut -f 2-  > ~{insert_size_file}
+        grep ^RL ~{raw_stats_file} | cut -f 2-  > ~{read_length_dist_file}
+        grep ^ID ~{raw_stats_file} | cut -f 2-  > ~{indel_distribution_file}
+        grep ^IC ~{raw_stats_file} | cut -f 2-  > ~{indels_per_cycle_file}
+        grep ^COV ~{raw_stats_file} | cut -f 2- > ~{coverage_distribution_file}
+        grep ^GCD ~{raw_stats_file} | cut -f 2- > ~{gc_depth_file}
+
+    >>>
+
+    output {
+        File raw_stats = raw_stats_file
+        File summary_stats = summary_stats_file
+        File first_frag_qual = first_frag_qual_file
+        File last_frag_qual = last_frag_qual_file
+        File first_frag_gc_content = first_frag_gc_content_file
+        File last_frag_gc_content = last_frag_gc_content_file
+        File acgt_content_per_cycle = acgt_content_per_cycle_file
+        File insert_size = insert_size_file
+        File read_length_dist = read_length_dist_file
+        File indel_distribution = indel_distribution_file
+        File indels_per_cycle = indels_per_cycle_file
+        File coverage_distribution = coverage_distribution_file
+        File gc_depth = gc_depth_file
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             1,
+        disk_gb:            disk_size,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-align:0.1.26"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {

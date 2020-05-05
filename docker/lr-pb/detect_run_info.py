@@ -17,6 +17,9 @@ parser.add_argument('--PL', type=str, help='platform name (PL) to use in place o
 parser.add_argument('--PM', type=str, help='platform model (PM) to use in place of the detected value')
 parser.add_argument('--PU', type=str, help='platform unit (PU) to use in place of the detected value')
 parser.add_argument('--DS', type=str, help='description (DS) to use in place of the detected value')
+
+parser.add_argument('--BS', type=str, help='bam suffix (BS) of the input file to search for', default='.subreads.bam')
+
 parser.add_argument('gcs_path', metavar='S', type=str, help='GCS path for long read data to process')
 args = parser.parse_args()
 
@@ -59,7 +62,7 @@ else:
 
     # First, populate run info (ri) hash with information gleaned from run metadata
     for blob in blobs:
-        if blob.name.endswith(".subreads.bam") and not blob.name.endswith(".scraps.bam"):
+        if blob.name.endswith(args.BS) and not blob.name.endswith(".scraps.bam"):
             bams.append(blob.name)
 
         if not "fail" in blob.name and bool(re.search('(f(ast)?q)(.gz)?', blob.name)):
