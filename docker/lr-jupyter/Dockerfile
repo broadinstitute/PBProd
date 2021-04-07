@@ -6,8 +6,10 @@ RUN pip install --upgrade pip \
     && pip install --upgrade seaborn \
     && pip install geopandas \
     && pip install tensorflow \
-    && pip install nbresuse \
-    && pip install umap-learn
+    && pip install nbresuse
+
+RUN pip install llvmlite --ignore-installed
+RUN pip install umap-learn
 
 RUN jupyter serverextension enable --py nbresuse --sys-prefix
 RUN jupyter nbextension install --py nbresuse --sys-prefix
@@ -72,7 +74,11 @@ RUN pip install parasail
 USER root
 RUN apt-get install -y libz-dev graphviz
 USER jovyan
-RUN pip install pyabpoa
+#RUN pip install pyabpoa
+RUN wget https://github.com/yangao07/abPOA/releases/download/v1.1.0/abPOA-v1.1.0.tar.gz \
+			&& tar -zxf abPOA-v1.1.0.tar.gz \
+			&& cd abPOA-v1.1.0 \
+			&& make install_py
 
 # Install PyCytoscape
 # (https://blog.jupyter.org/interactive-graph-visualization-in-jupyter-with-ipycytoscape-a8828a54ab63)
