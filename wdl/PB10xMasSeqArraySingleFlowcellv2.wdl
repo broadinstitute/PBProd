@@ -44,6 +44,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         File transcriptome_ref_fasta_index = "gs://broad-dsde-methods-long-reads/resources/gencode_v34/gencode.v34.pc_transcripts.fa.fai"
         File transcriptome_ref_fasta_dict = "gs://broad-dsde-methods-long-reads/resources/gencode_v34/gencode.v34.pc_transcripts.dict"
 
+        File genome_annotation_gtf = "gs://broad-dsde-methods-long-reads/resources/gencode_v34/gencode.v34.primary_assembly.annotation.gtf"
+
         File jupyter_template_static = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/MAS-seq_QC_report_template-static.ipynb"
         File workflow_dot_file = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/PB10xMasSeqArraySingleFlowcellv2.dot"
 
@@ -72,6 +74,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         transcriptome_ref_fasta : "FASTA file containing the reference sequence to which the array elements should be aligned."
         transcriptome_ref_fasta_index : "FASTA index file for the given transcriptome_ref_fasta file."
         transcriptome_ref_fasta_dict : "Sequence dictionary file for the given transcriptome_ref_fasta file."
+
+        genome_annotation_gtf : "Gencode GTF file containing genome annotations for the organism under study (usually humans).  This must match the given reference version (usually hg38)."
 
         jupyter_template_static : "Jupyter notebook / ipynb file containing a template for the QC report which will contain static plots.  This should contain the same information as the jupyter_template_interactive file, but with static images."
         workflow_dot_file : "DOT file containing the representation of this WDL to be included in the QC reports.  This can be generated with womtool."
@@ -488,6 +492,16 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             prefix = "~{SM[0]}.~{ID[0]}.gene_tx_expression_count_matrix"
     }
 
+    # Only create the anndata objects if we're looking at real genomic data:
+    if ( ! is_SIRV_data ) {
+        call TX_POST.CreateCountMatrixAnndataFromTsv {
+            input:
+                count_matrix_tsv = CreateCountMatrixFromAnnotatedBam.count_matrix,
+                gencode_gtf_file = genome_annotation_gtf,
+                prefix = "~{SM[0]}.~{ID[0]}.gene_tx_expression_count_matrix"
+        }
+    }
+
     ##########
     # Metrics and plots
     ##########
@@ -604,6 +618,20 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             ],
             outdir = quantDir,
             keyfile = GenerateStaticReport.html_report
+    }
+    # Finalize our anndata objects if we have them:
+    if ( ! is_SIRV_data ) {
+        call FF.FinalizeToDir as FinalizeProcessedQuantResults {
+            input:
+                files = select_all([
+                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_pickle,
+                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_pickle,
+                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_h5ad,
+                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_h5ad,
+                ]),
+                outdir = quantDir,
+                keyfile = GenerateStaticReport.html_report
+        }
     }
 
     # Finalize all the 10x metrics here:
