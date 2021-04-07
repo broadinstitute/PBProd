@@ -201,11 +201,9 @@ def main(input_tsv, gencode_gtf, out_prefix):
     print("Input files verified.", file=sys.stderr)
 
     # Create our maps for TX and Gene names:
-    print("Creating transcript / gene ID -> name maps...", file=sys.stderr)
     tx_id_name_map, tx_id_gene_map = create_transcript_and_gene_name_maps(gencode_gtf)
 
     # Get the counts themselves for the maps we created:
-    print("Tallying counts from input data...", file=sys.stderr)
     tx_counts, gene_counts = get_cell_transcript_counts(input_tsv, tx_id_name_map, tx_id_gene_map)
 
     # Create our anndata objects from the given data:
