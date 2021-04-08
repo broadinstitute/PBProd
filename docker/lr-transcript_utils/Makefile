@@ -1,4 +1,4 @@
-VERSION = 0.0.3
+VERSION = 0.0.4
 NAME = lr-transcript_utils
 
 TAG1 = quay.io/broad-long-read-pipelines/$(NAME):$(VERSION)

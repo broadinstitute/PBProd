@@ -1,5 +1,5 @@
 # Start with a good base python3 image:
-FROM ubuntu:19.10
+FROM ubuntu:20.04
 MAINTAINER Jonn Smith <jonn@broadinstitute.org>
 
 # Make sure we don't need to interact with any package installations:
@@ -13,6 +13,8 @@ WORKDIR /
 
 # Make sure we can actually talk to package repos:
 RUN apt-get update 
+RUN apt-get install -y apt-utils
+RUN apt-get -y upgrade
 
 # Development / prereqs for building software:
 RUN apt-get -y install make gcc g++ autoconf sudo 
@@ -70,7 +72,8 @@ RUN git clone https://github.com/lh3/minimap2.git \
     && cd .. \
     && rm -rf minimap2
 
-RUN apt-get install -y libcurl4-openssl-dev libssl-dev
+RUN apt-get update 
+RUN apt-get install -y --fix-missing libcurl4-openssl-dev libssl-dev
 RUN wget https://github.com/samtools/samtools/releases/download/1.10/samtools-1.10.tar.bz2 \
     && tar -xf samtools-1.10.tar.bz2 \
     && cd samtools-1.10 \
@@ -81,6 +84,7 @@ RUN wget https://github.com/samtools/samtools/releases/download/1.10/samtools-1.
     && rm -rf samtools-1.10.tar.bz2
 
 # Add in requirements for FLAIR tools:
+RUN apt-get install -y r-base 
 RUN apt-get install -y r-base-dev r-base-core
 RUN python3.8 -m pip install --no-cache-dir pandas 
 RUN python3.8 -m pip install --no-cache-dir rpy2 
