@@ -1,5 +1,5 @@
-IMAGE_NAME = lr-racon
-VERSION = 0.1.0
+IMAGE_NAME = lr-cartographer
+VERSION = 0.0.4
 
 TAG1 = quay.io/broad-long-read-pipelines/$(IMAGE_NAME):$(VERSION)
 TAG2 = quay.io/broad-long-read-pipelines/$(IMAGE_NAME):latest

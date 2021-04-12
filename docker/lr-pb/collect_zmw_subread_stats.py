@@ -109,7 +109,7 @@ def main(raw_args):
     parser = argparse.ArgumentParser(
         description="Ingests one file: "
                     "PacBio subreads file (SAM/BAM) containing raw subreads off the instrument.",
-        usage="Naively split every sequence in the given reads file by the delimiters in the given delimters file.",
+        usage="Get the stats from the given polymerase reads and dump them to the specified output file(s).",
     )
 
     required_args = parser.add_argument_group("required arguments")

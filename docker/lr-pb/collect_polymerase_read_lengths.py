@@ -64,39 +64,53 @@ def get_polymerase_read_lengths(args):
         out_file.write("\t".join(['zmw'] + ['polymerase_read_length']))
         out_file.write("\n")
 
-        with pysam.AlignmentFile(args.subreads, 'rb', check_sq=False) as bam_file, \
-                pysam.AlignmentFile(args.scraps, 'rb', check_sq=False) as scraps_file:
+        with pysam.AlignmentFile(args.subreads, 'rb', check_sq=False) as bam_file:
 
-            num_subreads = 0
-            num_scraps = 0
+            # Account for optional scraps file:
+            if args.scraps:
+                scraps_file = pysam.AlignmentFile(args.scraps, 'rb', check_sq=False)
 
-            subreads_generator = alignment_file_read_generator(bam_file)
-            scraps_generator = alignment_file_read_generator(scraps_file)
+                scraps_generator = alignment_file_read_generator(scraps_file)
+                all_scraps_processed = False
+            else:
+                all_scraps_processed = True
 
-            polymerase_read_length_map = dict()
+            try:
+                total_num_reads = 0
+                num_subreads = 0
+                num_scraps = 0
+                subreads_generator = alignment_file_read_generator(bam_file)
 
-            all_subreads_processed = False
-            all_scraps_processed = False
+                polymerase_read_length_map = dict()
 
-            while not all_subreads_processed and not all_scraps_processed:
-                # Get info for subreads:
-                if not all_subreads_processed:
-                    all_subreads_processed = update_polymerase_read_count_with_next_read(subreads_generator,
-                                                                                         polymerase_read_length_map)
-                    num_subreads += 1
+                all_subreads_processed = False
 
-                # Get info for scraps:
-                if not all_scraps_processed:
-                    all_subreads_processed = update_polymerase_read_count_with_next_read(scraps_generator,
-                                                                                         polymerase_read_length_map)
-                    num_scraps += 1
+                while not all_subreads_processed or not all_scraps_processed:
+                    # Get info for subreads:
+                    if not all_subreads_processed:
+                        all_subreads_processed = update_polymerase_read_count_with_next_read(subreads_generator,
+                                                                                             polymerase_read_length_map)
+                        num_subreads += 1
+                        total_num_reads += 1
 
-                if (num_subreads + num_scraps) % 10000 == 0:
-                    LOGGER.info(f"Processed {num_subreads} subreads\t{num_scraps} scraps")
+                    # Get info for scraps:
+                    if not all_scraps_processed:
+                        all_subreads_processed = update_polymerase_read_count_with_next_read(scraps_generator,
+                                                                                             polymerase_read_length_map)
+                        num_scraps += 1
+                        total_num_reads += 1
+
+                    if total_num_reads % 10000 == 0:
+                        LOGGER.info(f"Processed {num_subreads} subreads\t{num_scraps} scraps")
+            finally:
+                if args.scraps:
+                    scraps_file.close()
 
         LOGGER.info(f"Subreads processed: {num_subreads}")
-        LOGGER.info(f"Scraps processed: {num_scraps}")
-        LOGGER.info(f"Total reads processed: {num_subreads + num_scraps}")
+        if args.scraps:
+            LOGGER.info(f"Scraps processed: {num_scraps}")
+        else:
+            LOGGER.info(f"Total reads processed: {total_num_reads}")
         LOGGER.info(f"Writing results...")
 
         # Now write out the results:
@@ -115,11 +129,12 @@ def main(raw_args):
     overall_start = time.time()
 
     parser = argparse.ArgumentParser(
-        description="Ingests two files: "
+        description="Ingests at least one file: "
                     "1) PacBio subreads file (SAM/BAM) containing raw subreads off the instrument.  "
-                    "2) PacBio scraps file (SAM/BAM) containing raw scraps off the instrument.  "
+                    "2) (optional) PacBio scraps file (SAM/BAM) containing raw scraps off the instrument.  "
                     "Uses the read names as indicators of polymerase read length (for speed).",
-        usage="Count the lengths of the raw polymerase reads in each zmw.",
+        usage="Count the lengths of the raw polymerase reads in each zmw.  "
+              "If the scraps file is omitted, the resulting lengths will be ESTIMATES rather than true calculations.",
     )
 
     required_args = parser.add_argument_group("required arguments")
@@ -127,7 +142,7 @@ def main(raw_args):
         "-s", "--subreads", help="PacBio subreads SAM/BAM file.", required=True
     )
     required_args.add_argument(
-        "-p", "--scraps", help="PacBio scraps SAM/BAM file.", required=True
+        "-p", "--scraps", help="PacBio scraps SAM/BAM file.", required=False
     )
 
     parser.add_argument(
@@ -162,6 +177,10 @@ def main(raw_args):
     for name, val in vars(args).items():
         LOGGER.info("    %s = %s", name, val)
     LOGGER.info("Log level set to: %s", logging.getLevelName(logging.getLogger().level))
+
+    # Warn the user that without scraps, we can only do estimation:
+    if not args.scraps:
+        LOGGER.warning(f"No scraps file provided.  Counts produced will be APPROXIMATE!")
 
     # Call our main method:
     get_polymerase_read_lengths(args)

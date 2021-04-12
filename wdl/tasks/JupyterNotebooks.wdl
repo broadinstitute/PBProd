@@ -20,13 +20,13 @@ task PB10xMasSeqSingleFlowcellReport {
 
         File ccs_bam_file
         File array_element_bam_file
-        File ccs_rejected_bam_file
+        File? ccs_rejected_bam_file
 
         File annotated_bam_file
 
-        File zmw_subread_stats_file
-        File polymerase_read_lengths_file
-        File approx_raw_subread_array_lengths
+        File? zmw_subread_stats_file
+        File? polymerase_read_lengths_file
+        File? approx_raw_subread_array_lengths
 
         File? ten_x_metrics_file
 
@@ -47,15 +47,15 @@ task PB10xMasSeqSingleFlowcellReport {
         ccs_bam_file : "Unaligned reads file in BAM format from the CCS process (pre-array splitting)."
 
         array_element_bam_file : "Aligned reads file in BAM format containing aligned MASSeq array elements as individual reads."
-        ccs_rejected_bam_file : "Bam file containing all subreads from zmws that were rejected by CCS."
+        ccs_rejected_bam_file : "[optional] Bam file containing all subreads from zmws that were rejected by CCS."
 
         annotated_bam_file : "Bam file containing ccs corrected reads with annotated sections in the SG tag."
 
-        zmw_subread_stats_file : "File containing statistics about the subreads from each ZMW (created by collect_zmw_subread_stats.py in the PBUtils docker container)."
-        polymerase_read_lengths_file : "File containing the lengths of each polymerase read from the sequencer (as created by collect_polymerase_read_lengths.py)"
-        approx_raw_subread_array_lengths : "File containing the approximate array length information from the raw (pre-ccs) subreads file  (created by get_approx_raw_subread_array_lengths.py in the Cartographer docker container)."
+        zmw_subread_stats_file : "[optional] File containing statistics about the subreads from each ZMW (created by collect_zmw_subread_stats.py in the PBUtils docker container)."
+        polymerase_read_lengths_file : "[optional] File containing the lengths of each polymerase read from the sequencer (as created by collect_polymerase_read_lengths.py)"
+        approx_raw_subread_array_lengths : "[optional] File containing the approximate array length information from the raw (pre-ccs) subreads file  (created by get_approx_raw_subread_array_lengths.py in the Cartographer docker container)."
 
-        ten_x_metrics_file : "Stats file from the 10x tool run for the data in this MASSeq run.  If not supplied stats will not be displayed in the resulting report."
+        ten_x_metrics_file : "[optional] Stats file from the 10x tool run for the data in this MASSeq run.  If not supplied stats will not be displayed in the resulting report."
         workflow_dot_file : "DOT file containing the representation of this workflow used to create and analyze the data.  This is included in the QC reports (the DOT file can be generated with womtool)."
 
         prefix : "[optional] Prefix to prepend to the name of the generated report."
@@ -82,9 +82,13 @@ task PB10xMasSeqSingleFlowcellReport {
             size(workflow_dot_file, "GB")
         ))
 
-    # Handle the optional 10x metrics file:
+    # Handle the optional files:
     String ten_x_metrics_file_name = if defined(ten_x_metrics_file) then ten_x_metrics_file else "NON-EXISTENT-PLACEHOLDER"
-
+    String ccs_rejected_bam_file_name = if defined(ccs_rejected_bam_file) then ccs_rejected_bam_file else "NON-EXISTENT-PLACEHOLDER"
+    String zmw_subread_stats_file_name = if defined(zmw_subread_stats_file) then zmw_subread_stats_file else "NON-EXISTENT-PLACEHOLDER"
+    String polymerase_read_lengths_file_name = if defined(polymerase_read_lengths_file) then polymerase_read_lengths_file else "NON-EXISTENT-PLACEHOLDER"
+    String approx_raw_subread_array_lengths_name = if defined(approx_raw_subread_array_lengths) then approx_raw_subread_array_lengths else "NON-EXISTENT-PLACEHOLDER"
+    
     command <<<
         set -euxo pipefail
 
@@ -115,13 +119,13 @@ task PB10xMasSeqSingleFlowcellReport {
 
         echo "~{ccs_bam_file}" >> mas-seq_qc_inputs.config
         echo "~{array_element_bam_file}" >> mas-seq_qc_inputs.config
-        echo "~{ccs_rejected_bam_file}" >> mas-seq_qc_inputs.config
+        echo "~{ccs_rejected_bam_file_name}" >> mas-seq_qc_inputs.config
 
         echo "~{annotated_bam_file}" >> mas-seq_qc_inputs.config
 
-        echo "~{zmw_subread_stats_file}" >> mas-seq_qc_inputs.config
-        echo "~{polymerase_read_lengths_file}" >> mas-seq_qc_inputs.config
-        echo "~{approx_raw_subread_array_lengths}" >> mas-seq_qc_inputs.config
+        echo "~{zmw_subread_stats_file_name}" >> mas-seq_qc_inputs.config
+        echo "~{polymerase_read_lengths_file_name}" >> mas-seq_qc_inputs.config
+        echo "~{approx_raw_subread_array_lengths_name}" >> mas-seq_qc_inputs.config
 
         echo "~{ten_x_metrics_file_name}" >> mas-seq_qc_inputs.config
 

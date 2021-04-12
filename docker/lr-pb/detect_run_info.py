@@ -9,6 +9,16 @@ import argparse
 import pprint
 import os
 
+
+def sanitize_value(val):
+    """Sanitize an info field value so that it can be properly ingested by downstream tools."""
+
+    # Add more rules as needed:
+    while val.endswith("\\"):
+        val = val[:-1]
+
+    return val
+
 parser = argparse.ArgumentParser(description='Detect long read run information.')
 parser.add_argument('--SM', type=str, help='sample name (SM) to use in place of detected value')
 parser.add_argument('--ID', type=str, help='read group identifier (ID) to use in place of detected value')
@@ -185,7 +195,7 @@ for key in ri.keys():
     ri[key] = ri[key][0] if isinstance(ri[key], tuple) else ri[key]
 
 for k, v in ri.items():
-    print(f'{k}\t{v}')
+    print(f'{k}\t{sanitize_value(v)}')
 
 if 0 < len(f5s) != len(fqs):
     sys.exit(f"Error: possible incomplete upload; len(fast5s) ({len(f5s)} != len(fastqs) ({len(fqs)})")

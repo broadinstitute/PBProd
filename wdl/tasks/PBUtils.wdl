@@ -12,12 +12,57 @@ task FindBams {
     String indir = sub(gcs_input_dir, "/$", "")
 
     command <<<
-        set -euxo pipefail
+        # Commenting out this line to make it able to run even if there are no subreads / reads files:
+        # set -euxo pipefail
+
         gsutil ls ~{indir}/**subreads.bam | sort > subread_bams.txt
+        gsutil ls ~{indir}/**.reads.bam | sort > ccs_bams.txt
     >>>
 
     output {
         Array[String] subread_bams = read_lines("subread_bams.txt")
+        Array[String] ccs_bams = read_lines("ccs_bams.txt")
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             1,
+        disk_gb:            1,
+        boot_disk_gb:       10,
+        preemptible_tries:  0,
+        max_retries:        0,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-utils:0.1.6"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}
+
+task FindCCSReport {
+    input {
+        String gcs_input_dir
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    String indir = sub(gcs_input_dir, "/$", "")
+
+    command <<<
+        set -euxo pipefail
+        gsutil ls ~{indir}/**.ccs_reports.txt | sort > ccs_reports.txt
+    >>>
+
+    output {
+        # There should be only one CCS report here:
+        File ccs_report = read_lines("ccs_reports.txt")[0]
     }
 
     #########################
@@ -62,7 +107,7 @@ task GetRunInfo {
 
         # We need to update detect_run_info.py to make it sanitize fields.
         # The `sed` statement here is a hack to get around an issue.
-        python /usr/local/bin/detect_run_info.py ~{gcs_dir} ~{bam_suffix_arg}~{default="" sep=" --BS " bam_suffix} | sed 's#\\$##' > run_info.txt
+        python /usr/local/bin/detect_run_info.py ~{gcs_dir} ~{bam_suffix_arg}~{default="" sep=" --BS " bam_suffix} > run_info.txt
     >>>
 
     output {

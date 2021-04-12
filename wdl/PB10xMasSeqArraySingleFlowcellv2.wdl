@@ -94,9 +94,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     call PB.FindBams { input: gcs_input_dir = gcs_input_dir }
 
-    scatter (subread_bam in FindBams.subread_bams) {
+    # Check here if we found ccs bams or subread bams:
+    Boolean use_subreads = if length(FindBams.subread_bams) >= 1 then true else false
+    Array[String] top_level_bam_files = if use_subreads then FindBams.subread_bams else FindBams.ccs_bams
 
-        call PB.GetRunInfo { input: subread_bam = subread_bam }
+    scatter (reads_bam in top_level_bam_files) {
+
+        call PB.GetRunInfo { input: subread_bam = reads_bam }
 
         String SM  = select_first([sample_name, GetRunInfo.run_info["SM"]])
         String PL  = "PACBIO"
@@ -111,101 +115,115 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         String RG_array_elements = "@RG\\tID:~{ID}.array_elements\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
 
         # Get statistics on polymerase reads:
-        call PB.CollectPolymeraseReadLengths {
-            input:
-                gcs_input_dir = gcs_input_dir,
-                subreads = subread_bam,
-                prefix = SM + "_polymerase_read_lengths"
+        if (use_subreads) {
+            call PB.CollectPolymeraseReadLengths {
+                input:
+                    gcs_input_dir = gcs_input_dir,
+                    subreads = reads_bam,
+                    prefix = SM + "_polymerase_read_lengths"
+            }
         }
 
-        # Setting the sharding machine to be stronger will give it better network speeds
-        # which will decrease localization time.  This costs slightly more, but will probably be offset by reducing
-        # the time the node has to run.
-        # Network Speed Info: https://cloud.google.com/compute/docs/machine-types
-        # Node cost: https://cloud.google.com/compute/vm-instance-pricing
-        RuntimeAttr sharding_runtime_attrs = object {
-            cpu_cores: 4,
-            mem_gb: 8,
-            preemptible_tries: 0
-        }
-        call Utils.ShardLongReads {
+        File read_pbi = sub(reads_bam, ".bam$", ".bam.pbi")
+        call PB.ShardLongReads {
             input:
-                unmapped_files = [ subread_bam ],
-                num_reads_per_split = 100000,
-                runtime_attr_override = sharding_runtime_attrs
+                unaligned_bam = reads_bam,
+                unaligned_pbi = read_pbi,
+                prefix = SM + "_shard"
         }
 
-        scatter (subreads in ShardLongReads.unmapped_shards) {
+        scatter (sharded_reads in ShardLongReads.unmapped_shards) {
 
             ## No more preemption on this sharding - takes too long otherwise.
             RuntimeAttr disable_preemption_runtime_attrs = object {
                 preemptible_tries: 0
             }
 
-            # Call CCS on the subreads from the sequencer:
-            # No preepting because these take long enough that it doesn't seem to save $
-            # 16 gigs of memory because I had a crash at 8
-            RuntimeAttr ccs_runtime_attrs = object {
-                mem_gb: 16,
-                preemptible_tries: 0
-            }
-            call PB.CCS {
-                input:
-                    subreads = subreads,
-                    min_passes = min_ccs_passes,
-                    disk_space_scale_factor = 4,
-                    runtime_attr_override = ccs_runtime_attrs
-            }
-
-            # Get our uncorrected / CCS Rejected reads:
-            call PB.ExtractUncorrectedReads {
-                input:
-                    subreads = subreads,
-                    consensus = CCS.consensus,
-                    prefix = SM + "_ccs_rejected",
-                    runtime_attr_override = disable_preemption_runtime_attrs
-            }
-
-            call Utils.ShardLongReads as SubshardRawSubreads {
-                input:
-                    unmapped_files = [ subreads ],
-                    num_reads_per_split = 50000,
-                    runtime_attr_override = sharding_runtime_attrs
-            }
-            scatter (subsharded_subreads in SubshardRawSubreads.unmapped_shards) {
-
-                # Get ZMW Subread stats here to shard them out wider and make it faster:
-                call PB.CollectZmwSubreadStats as CollectZmwSubreadStats_subsharded {
+            if (use_subreads) {
+                # Call CCS on the subreads from the sequencer:
+                # No preepting because these take long enough that it doesn't seem to save $
+                # 16 gigs of memory because I had a crash at 8
+                RuntimeAttr ccs_runtime_attrs = object {
+                    mem_gb: 16,
+                    preemptible_tries: 0
+                }
+                call PB.CCS {
                     input:
-                        subreads = subsharded_subreads,
-                        prefix = SM + "_zmw_subread_stats"
+                        subreads = sharded_reads,
+                        min_passes = min_ccs_passes,
+                        disk_space_scale_factor = 4,
+                        runtime_attr_override = ccs_runtime_attrs
+                }
+                call PB.PBIndex as PBIndexCCSReads { input: bam = CCS.consensus }
+
+                # Get our uncorrected / CCS Rejected reads:
+                call PB.ExtractUncorrectedReads {
+                    input:
+                        subreads = sharded_reads,
+                        consensus = CCS.consensus,
+                        prefix = SM + "_ccs_rejected",
+                        runtime_attr_override = disable_preemption_runtime_attrs
+                }
+                call PB.PBIndex as PBIndexSubreadShard { input: bam = sharded_reads }
+
+                call PB.ShardLongReads as SubshardRawSubreads {
+                    input:
+                        unaligned_bam = sharded_reads,
+                        unaligned_pbi = PBIndexSubreadShard.pbindex,
+                        num_shards = 10,
+                        prefix = "subshard"
+                }
+                scatter (subsharded_subreads in SubshardRawSubreads.unmapped_shards) {
+
+                    # Get ZMW Subread stats here to shard them out wider and make it faster:
+                    call PB.CollectZmwSubreadStats as CollectZmwSubreadStats_subsharded {
+                        input:
+                            subreads = subsharded_subreads,
+                            prefix = SM + "_zmw_subread_stats"
+                    }
+
+                    # Get approximate subread array lengths here:
+                    call CART.GetApproxRawSubreadArrayLengths as GetApproxRawSubreadArrayLengths_subsharded {
+                        input:
+                            reads_file = subsharded_subreads,
+                            delimiters_fasta = segments_fasta,
+                            min_qual = 7.0,
+                            ignore_seqs = ["Poly_A", "Poly_T", "3_prime_TSO", "5_prime_TSO"],
+                            prefix = SM + "_approx_raw_subread_array_lengths"
+                    }
                 }
 
-                # Get approximate subread array lengths here:
-                call CART.GetApproxRawSubreadArrayLengths as GetApproxRawSubreadArrayLengths_subsharded {
+                # Merge our micro-shards of subread stats:
+                call Utils.MergeTsvFiles as MergeMicroShardedZmwSubreadStats {
                     input:
-                        reads_file = subsharded_subreads,
-                        delimiters_fasta = segments_fasta,
-                        min_qual = 7.0,
-                        ignore_seqs = ["Poly_A", "Poly_T", "3_prime_TSO", "5_prime_TSO"],
-                        prefix = SM + "_approx_raw_subread_array_lengths"
+                        tsv_files = CollectZmwSubreadStats_subsharded.zmw_subread_stats
+                }
+
+                # Merge the micro-sharded raw subread array element counts:
+                call Utils.MergeTsvFiles as MergeMicroShardedRawSubreadArrayElementCounts {
+                    input:
+                        tsv_files = GetApproxRawSubreadArrayLengths_subsharded.approx_subread_array_lengths
+                }
+            }
+            if (!use_subreads) {
+                # Handle setting up the things that we need for further processing of CCS-only reads:
+                call PB.FindCCSReport {
+                    input:
+                        gcs_input_dir = gcs_input_dir
                 }
             }
 
-            # Merge our micro-shards of subread stats:
-            call Utils.MergeTsvFiles as MergeMicroShardedZmwSubreadStats {
-                input:
-                    tsv_files = CollectZmwSubreadStats_subsharded.zmw_subread_stats
-            }
-
-            # Merge the micro-sharded raw subread array element counts:
-            call Utils.MergeTsvFiles as MergeMicroShardedRawSubreadArrayElementCounts {
-                input:
-                    tsv_files = GetApproxRawSubreadArrayLengths_subsharded.approx_subread_array_lengths
-            }
+            # Resolve our CCS-corrected bam depending on if we have CCS reads or not:
+            File ccs_bam = if use_subreads then select_first([CCS.consensus]) else sharded_reads
 
             # Shard these reads even wider so we can make sure we don't run out of memory:
-            call Utils.ShardLongReadsWithCopy as ShardCorrectedReads { input: unmapped_files = [ CCS.consensus ], num_reads_per_split = 20000 }
+            File ccs_pbi = sub(ccs_bam, ".bam$", ".bam.pbi")
+            call PB.ShardLongReads as ShardCorrectedReads{
+                input:
+                    unaligned_bam = ccs_bam,
+                    unaligned_pbi = ccs_pbi,
+                    prefix = SM + "_subshard"
+            }
 
             scatter (corrected_shard in ShardCorrectedReads.unmapped_shards) {
 
@@ -240,7 +258,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             }
             call AR.Minimap2 as AlignCCSReads {
                 input:
-                    reads      = [ CCS.consensus ],
+                    reads      = [ ccs_bam ],
                     ref_fasta  = ref_fasta,
                     RG         = RG_consensus,
                     map_preset = "splice",
@@ -331,18 +349,20 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 prefix = SM + "_ArrayElements_intermediate_2"
         }
 
-        # Merge the sharded zmw subread stats:
-        call Utils.MergeTsvFiles as MergeShardedZmwSubreadStats {
-            input:
-                tsv_files = MergeMicroShardedZmwSubreadStats.merged_tsv,
-                prefix = SM + "_zmw_subread_stats"
-        }
+        if (use_subreads) {
+            # Merge the sharded zmw subread stats:
+            call Utils.MergeTsvFiles as MergeShardedZmwSubreadStats {
+                input:
+                    tsv_files = select_all(MergeMicroShardedZmwSubreadStats.merged_tsv),
+                    prefix = SM + "_zmw_subread_stats"
+            }
 
-        # Merge the sharded raw subread array element counts:
-        call Utils.MergeTsvFiles as MergeShardedRawSubreadArrayElementCounts {
-            input:
-                tsv_files = MergeMicroShardedRawSubreadArrayElementCounts.merged_tsv,
-                prefix = SM + "_approx_subread_array_lengths"
+            # Merge the sharded raw subread array element counts:
+            call Utils.MergeTsvFiles as MergeShardedRawSubreadArrayElementCounts {
+                input:
+                    tsv_files = select_all(MergeMicroShardedRawSubreadArrayElementCounts.merged_tsv),
+                    prefix = SM + "_approx_subread_array_lengths"
+            }
         }
 
         # Merge the reads we shall use for quantification:
@@ -370,22 +390,25 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         call Utils.MergeBams as MergeAnnoatatedAlignedArrayElementChunk { input: bams = RestoreAnnotationstoAlignedBam.output_bam }
 
         # Merge all CCS bams together for this Subread BAM:
-        call Utils.MergeBams as MergeChunks { input: bams = CCS.consensus }
+        call Utils.MergeBams as MergeChunks { input: bams = ccs_bam }
 
         # Merge all CCS Rejected bams together:
-        call Utils.MergeBams as MergeCCSRejectedChunks { input: bams = ExtractUncorrectedReads.uncorrected }
+        if (use_subreads) {
+            call Utils.MergeBams as MergeCCSRejectedChunks { input: bams = select_all(ExtractUncorrectedReads.uncorrected) }
+        }
 
         # Merge all CCS bams together for this Subread BAM:
         call Utils.MergeBams as MergeAlignedChunks { input: bams = AlignCCSReads.aligned_bam }
 
         # Merge all CCS reports together for this Subread BAM:
-        call PB.MergeCCSReports as MergeCCSReports { input: reports = CCS.report }
+        Array[File] ccs_reports_to_merge = if use_subreads then select_all(CCS.report) else select_all(FindCCSReport.ccs_report)
+        call PB.MergeCCSReports as MergeCCSReports { input: reports = ccs_reports_to_merge }
 
         # Collect metrics on the subreads bam:
         RuntimeAttr subreads_sam_stats_runtime_attrs = object {
             cpu_cores:          2,
             mem_gb:             8,
-            disk_gb:            ceil(3 * size(subread_bam, "GiB")),
+            disk_gb:            ceil(3 * size(reads_bam, "GiB")),
             boot_disk_gb:       10,
             preemptible_tries:  0,
             max_retries:        1,
@@ -393,7 +416,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
         call AM.SamtoolsStats as CalcSamStatsOnInputBam {
             input:
-                bam = subread_bam,
+                bam = reads_bam,
                 runtime_attr_override = subreads_sam_stats_runtime_attrs
         }
         call FF.FinalizeToDir as FinalizeSamStatsOnInputBam {
@@ -463,7 +486,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     call Utils.MergeBams as MergeAnnotatedAlignedArrayElements { input: bams = MergeAnnoatatedAlignedArrayElementChunk.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.Aligned.Annotated.ArrayElements" }
 
     # Merge all CCS Rejected chunks:
-    call Utils.MergeBams as MergeAllCCSRejectedBams { input: bams = MergeCCSRejectedChunks.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.ccs_rejected" }
+    if (use_subreads) {
+        call Utils.MergeBams as MergeAllCCSRejectedBams { input: bams = select_all(MergeCCSRejectedChunks.merged_bam), prefix = "~{SM[0]}.~{ID[0]}.ccs_rejected" }
+    }
 
     # Merge all aligned CCS bams together for this flowcell:
     call Utils.MergeBams as MergeAllAlignedCCSBams { input: bams = MergeAlignedChunks.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.aligned.ccs" }
@@ -689,13 +714,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             keyfile = GenerateStaticReport.html_report
     }
 
-    call FF.FinalizeToDir as FinalizeAlignedCCSRejectedBams {
-        input:
-            files = [ MergeAllCCSRejectedBams.merged_bam, MergeAllCCSRejectedBams.merged_bai ],
-            outdir = base_out_dir + "/merged_bams/ccs_rejected",
-            keyfile = GenerateStaticReport.html_report
-    }
-
     call FF.FinalizeToDir as FinalizeCCSBams {
         input:
             files = [ MergeAllCCSBams.merged_bam, MergeAllCCSBams.merged_bai ],
@@ -710,25 +728,38 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             keyfile = GenerateStaticReport.html_report
     }
 
-    call FF.FinalizeToDir as FinalizeZmwSubreadStats {
-        input:
-            files = MergeShardedZmwSubreadStats.merged_tsv,
-            outdir = metrics_out_dir + "/ccs_metrics",
-            keyfile = GenerateStaticReport.html_report
-    }
+    # Finalize the files that we have created from raw subreads containing runs:
+    if (use_subreads) {
+        call FF.FinalizeToDir as FinalizeZmwSubreadStats {
+            input:
+                files = select_all(MergeShardedZmwSubreadStats.merged_tsv),
+                outdir = metrics_out_dir + "/ccs_metrics",
+                keyfile = GenerateStaticReport.html_report
+        }
 
-    call FF.FinalizeToDir as FinalizeRawSubreadArrayElementCounts {
-        input:
-            files = MergeShardedRawSubreadArrayElementCounts.merged_tsv,
-            outdir = metrics_out_dir + "/array_stats",
-            keyfile = GenerateStaticReport.html_report
-    }
+        call FF.FinalizeToDir as FinalizePolymeraseReadLengths {
+            input:
+                files = select_all(CollectPolymeraseReadLengths.polymerase_read_lengths_tsv),
+                outdir = metrics_out_dir + "/array_stats",
+                keyfile = GenerateStaticReport.html_report
+        }
 
-    call FF.FinalizeToDir as FinalizePolymeraseReadLengths {
-        input:
-            files = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
-            outdir = metrics_out_dir + "/array_stats",
-            keyfile = GenerateStaticReport.html_report
+        call FF.FinalizeToDir as FinalizeAlignedCCSRejectedBams {
+            input:
+                files = [
+                    select_first([MergeAllCCSRejectedBams.merged_bam]),
+                    select_first([MergeAllCCSRejectedBams.merged_bai])
+                ],
+                outdir = base_out_dir + "/merged_bams/ccs_rejected",
+                keyfile = GenerateStaticReport.html_report
+        }
+
+        call FF.FinalizeToDir as FinalizeRawSubreadArrayElementCounts {
+            input:
+                files = select_all(MergeShardedRawSubreadArrayElementCounts.merged_tsv),
+                outdir = metrics_out_dir + "/array_stats",
+                keyfile = GenerateStaticReport.html_report
+        }
     }
 
     # Write out completion file so in the future we can be 100% sure that this run was good:

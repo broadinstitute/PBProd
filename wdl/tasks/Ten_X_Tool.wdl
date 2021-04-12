@@ -1,6 +1,7 @@
 version 1.0
 
 import "Utils.wdl" as Utils
+import "PBUtils.wdl" as PB
 
 # TODO: Merge this file and `AnnotateAdapters.wdl`
 
@@ -56,18 +57,14 @@ workflow AnnotateBarcodesAndUMIsWorkflow {
         boot_disk_size_gb : "[optional] Amount of boot disk space (in Gb) to give to each machine running each task in this workflow."
     }
 
-    RuntimeAttr shard_runtime_attrs = object {
-        disk_gb:            20*ceil(size(bam_file, "GB"))
-    }
-
-    call Utils.ShardLongReadsWithCopy {
+    call PB.PBIndex as PBIndexSubreadShard { input: bam = bam_file }
+    call PB.ShardLongReads {
         input:
-            unmapped_files = [ bam_file ],
-            num_reads_per_split = 20000,
-            runtime_attr_override =  shard_runtime_attrs
+            unaligned_bam = bam_file,
+            unaligned_pbi = PBIndexSubreadShard.pbindex,
     }
 
-    scatter (reads_file in ShardLongReadsWithCopy.unmapped_shards) {
+    scatter (reads_file in ShardLongReads.unmapped_shards) {
 
         call AnnotateBarcodesAndUMIs {
             input:
