@@ -20,7 +20,7 @@ task FindBams {
         gsutil ls ~{indir}/**.reads.bam | sort > ccs_bams.txt
 
         # Check our file lists to see which are populated:
-        if [[ $( wc -l subread_bams.txt | awk '{print $1}' ) -gt 1 ]] ; then
+        if [[ $( wc -l subread_bams.txt | awk '{print $1}' ) -gt 0 ]] ; then
             echo 'Found subreads!'
             echo "true" > has_subreads.txt
         else
@@ -28,7 +28,7 @@ task FindBams {
             echo "false" > has_subreads.txt
         fi
 
-        if [[ $( wc -l ccs_bams.txt | awk '{print $1}' ) -gt 1 ]] ; then
+        if [[ $( wc -l ccs_bams.txt | awk '{print $1}' ) -gt 0 ]] ; then
             echo 'Found CCS reads!'
             echo "true" > has_ccs_reads.txt
         else
