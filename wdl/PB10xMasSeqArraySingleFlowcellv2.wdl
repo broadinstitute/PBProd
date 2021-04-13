@@ -97,7 +97,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     call PB.FindBams { input: gcs_input_dir = gcs_input_dir }
 
     # Check here if we found ccs bams or subread bams:
-    Boolean use_subreads = if length(FindBams.subread_bams) >= 1 then true else false
+    Boolean use_subreads = FindBams.has_subreads
     Array[String] top_level_bam_files = if use_subreads then FindBams.subread_bams else FindBams.ccs_bams
 
     scatter (reads_bam in top_level_bam_files) {
