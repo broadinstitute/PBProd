@@ -52,6 +52,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         Int min_ccs_passes = 2
 
         Boolean is_SIRV_data = false
+        Boolean is_mas_seq_10_array = false
 
         String? sample_name
     }
@@ -83,6 +84,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         min_ccs_passes : "[optional] Minimum number of passes required for CCS to take place on a ZMW (Default: 2)."
 
         is_SIRV_data : "[optional] true if and only if the data in this sample are from the SIRV library prep.  false otherwise (Default: false)"
+        is_mas_seq_10_array : "[optional] true if and only if the data in this sample were created using the 10 array element MAS-seq library prep.  false otherwise (Default: false)"
 
         sample_name : "[optional] The name of the sample to associate with the data in this workflow."
     }
@@ -229,12 +231,14 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
                 call ANNMAS.Annotate as AnnotateReads {
                     input:
-                        reads = corrected_shard
+                        reads = corrected_shard,
+                        is_mas_seq_10_array = is_mas_seq_10_array
                 }
 
                 call ANNMAS.Segment as SegmentAnnotatedReads {
                     input:
-                        annotated_reads = AnnotateReads.annotated_bam
+                        annotated_reads = AnnotateReads.annotated_bam,
+                        is_mas_seq_10_array = is_mas_seq_10_array
                 }
             }
 
@@ -583,6 +587,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             approx_raw_subread_array_lengths = MergeShardedRawSubreadArrayElementCounts.merged_tsv[0],
 
             ten_x_metrics_file               = Merge10XStats_2.merged_tsv,
+            is_mas_seq_10_array              = is_mas_seq_10_array,
 
             workflow_dot_file                = workflow_dot_file,
             prefix                           = SM[0] + "_MAS-seq_",

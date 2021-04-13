@@ -6,10 +6,13 @@ task Annotate
 {
     input {
         File reads
+        Boolean is_mas_seq_10_array = false
         String prefix = "annmas_annotated"
 
         RuntimeAttr? runtime_attr_override
     }
+
+    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
 
     Int disk_size = 4*ceil(size(reads, "GB"))
 
@@ -17,7 +20,7 @@ task Annotate
         set -euxo pipefail
 
         source /annmas/venv/bin/activate
-        annmas annotate -t8 -v INFO ~{reads} -o ~{prefix}.bam
+        annmas annotate -t8 -v INFO ~{reads} ~{model_spec_arg} -o ~{prefix}.bam
     >>>
 
     output {
@@ -50,18 +53,20 @@ task Segment
 {
     input {
         File annotated_reads
+        Boolean is_mas_seq_10_array = false
         String prefix = "annmas_segmented"
 
         RuntimeAttr? runtime_attr_override
     }
 
+    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
     Int disk_size = 4*ceil(size(annotated_reads, "GB"))
 
     command <<<
         set -euxo pipefail
 
         source /annmas/venv/bin/activate
-        annmas segment -v INFO -s ~{annotated_reads} -o ~{prefix}.bam
+        annmas segment -v INFO -s ~{annotated_reads} ~{model_spec_arg} -o ~{prefix}.bam
     >>>
 
     output {
@@ -94,6 +99,7 @@ task ScSplit
 {
     input {
         File reads_bam
+        Boolean is_mas_seq_10_array = false
 
         String force_option = ""
 
@@ -105,6 +111,8 @@ task ScSplit
         RuntimeAttr? runtime_attr_override
     }
 
+    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
+
     # On average bam compression is 10x and we have more data on output than that:
     Int disk_size = 15*ceil(size(reads_bam, "GB"))
 
@@ -112,7 +120,7 @@ task ScSplit
         set -euxo pipefail
 
         source /annmas/venv/bin/activate
-        annmas scsplit -t4 -v INFO -b ~{force_option} -o ~{prefix} -u ~{umi_length} -c ~{cbc_dummy} ~{reads_bam}
+        annmas scsplit -t4 -v INFO ~{model_spec_arg} -b ~{force_option} -o ~{prefix} -u ~{umi_length} -c ~{cbc_dummy} ~{reads_bam}
     >>>
 
     output {
@@ -152,18 +160,20 @@ task Inspect
 
         File read_names
 
+        Boolean is_mas_seq_10_array = false
         String prefix = "annmas_inspected_reads"
 
         RuntimeAttr? runtime_attr_override
     }
 
+    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
     Int disk_size = 4*ceil(size(reads, "GB")) + size(reads_pbi, "GB") + size(read_names, "GB")
 
     command <<<
         set -euxo pipefail
 
         source /annmas/venv/bin/activate
-        annmas inspect ~{reads} -p ~{reads_pbi} -r ~{read_names} -o ~{prefix}
+        annmas inspect ~{model_spec_arg} ~{reads} -p ~{reads_pbi} -r ~{read_names} -o ~{prefix}
         tar -zxf ~{prefix}.tar.gz ~{prefix}
     >>>
 

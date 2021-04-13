@@ -29,6 +29,7 @@ task PB10xMasSeqSingleFlowcellReport {
         File? approx_raw_subread_array_lengths
 
         File? ten_x_metrics_file
+        Boolean is_mas_seq_10_array
 
         File workflow_dot_file
 
@@ -56,6 +57,8 @@ task PB10xMasSeqSingleFlowcellReport {
         approx_raw_subread_array_lengths : "[optional] File containing the approximate array length information from the raw (pre-ccs) subreads file  (created by get_approx_raw_subread_array_lengths.py in the Cartographer docker container)."
 
         ten_x_metrics_file : "[optional] Stats file from the 10x tool run for the data in this MASSeq run.  If not supplied stats will not be displayed in the resulting report."
+        is_mas_seq_10_array : "[optional] true if and only if the data in this sample were created using the 10 array element MAS-seq library prep.  false otherwise (Default: false)"
+
         workflow_dot_file : "DOT file containing the representation of this workflow used to create and analyze the data.  This is included in the QC reports (the DOT file can be generated with womtool)."
 
         prefix : "[optional] Prefix to prepend to the name of the generated report."
@@ -88,7 +91,9 @@ task PB10xMasSeqSingleFlowcellReport {
     String zmw_subread_stats_file_name = if defined(zmw_subread_stats_file) then zmw_subread_stats_file else "NON-EXISTENT-PLACEHOLDER"
     String polymerase_read_lengths_file_name = if defined(polymerase_read_lengths_file) then polymerase_read_lengths_file else "NON-EXISTENT-PLACEHOLDER"
     String approx_raw_subread_array_lengths_name = if defined(approx_raw_subread_array_lengths) then approx_raw_subread_array_lengths else "NON-EXISTENT-PLACEHOLDER"
-    
+
+    String is_mas_seq_10_array_arg = if is_mas_seq_10_array then "True" else "False"
+
     command <<<
         set -euxo pipefail
 
@@ -128,6 +133,7 @@ task PB10xMasSeqSingleFlowcellReport {
         echo "~{approx_raw_subread_array_lengths_name}" >> mas-seq_qc_inputs.config
 
         echo "~{ten_x_metrics_file_name}" >> mas-seq_qc_inputs.config
+        echo "~{is_mas_seq_10_array_arg}" >> mas-seq_qc_inputs.config
 
         echo "~{workflow_dot_file}" >> mas-seq_qc_inputs.config
 
