@@ -213,13 +213,17 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     input:
                         gcs_input_dir = gcs_input_dir
                 }
+                call PB.PBIndex as PbIndexShardedReads {
+                    input:
+                        bam = sharded_reads
+                }
             }
 
             # Resolve our CCS-corrected bam depending on if we have CCS reads or not:
             File ccs_bam = if use_subreads then select_first([CCS.consensus]) else sharded_reads
 
             # Shard these reads even wider so we can make sure we don't run out of memory:
-            File ccs_pbi = sub(ccs_bam, ".bam$", ".bam.pbi")
+            File ccs_pbi = if use_subreads then sub(ccs_bam, ".bam$", ".bam.pbi") else select_first([PbIndexShardedReads.pbindex])
             call PB.ShardLongReads as ShardCorrectedReads{
                 input:
                     unaligned_bam = ccs_bam,
