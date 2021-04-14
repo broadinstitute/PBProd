@@ -15,7 +15,7 @@ import "tasks/Annmas.wdl" as ANNMAS
 import "tasks/TranscriptAnalysis/UMI_Tools.wdl" as UMI_TOOLS
 import "tasks/TranscriptAnalysis/Postprocessing_Tasks.wdl" as TX_POST
 
-workflow PB10xMasSeqSingleFlowcellv2 {
+workflow PB10xMasSeqArrayPreProcessing {
 
     meta {
         description : "This workflow is designed to pre-process data from the MASSeq v2 protocol.  It will first filter PacBio Sequel IIe reads to keep only the high quality reads.  Then it will create several bam files - one for each model - and populate those files with the reads that best fit those models."
