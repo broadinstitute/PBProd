@@ -25,7 +25,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     input {
         String gcs_input_dir
-        String gcs_out_root_dir = "gs://broad-dsde-methods-long-reads-outgoing/PB10xMasSeqSingleFlowcellv2"
+        String gcs_out_root_dir = "gs://broad-dsde-methods-long-reads-outgoing/PB10xMasSeqArrayPreProcessing"
 
         Float min_read_quality = 0.99
 
