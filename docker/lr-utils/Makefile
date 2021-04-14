@@ -1,5 +1,5 @@
 IMAGE_NAME = lr-utils
-VERSION = 0.1.7
+VERSION = 0.1.9.beta
 
 TAG1 = quay.io/broad-long-read-pipelines/$(IMAGE_NAME):$(VERSION)
 TAG2 = quay.io/broad-long-read-pipelines/$(IMAGE_NAME):latest

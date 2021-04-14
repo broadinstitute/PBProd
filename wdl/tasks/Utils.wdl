@@ -1086,11 +1086,7 @@ task ConvertFastaToOneLineSequences {
     input {
         File reads_fasta
 
-        Int? mem_gb
-        Int? preemptible_attempts
-        Int? disk_space_gb
-        Int? cpu
-        Int? boot_disk_size_gb
+        RuntimeAttr? runtime_attr_override
     }
 
     # ------------------------------------------------
@@ -1102,18 +1098,7 @@ task ConvertFastaToOneLineSequences {
 
     # ------------------------------------------------
     # Get machine settings:
-    Boolean use_ssd = false
-
-    Float input_files_size_gb = size(reads_fasta, "GiB")
-
-    # You may have to change the following two parameter values depending on the task requirements
-    Int default_ram_mb = 2048
-    Int default_disk_space_gb = ceil((input_files_size_gb * 2) + 1024)
-
-    Int default_boot_disk_size_gb = 15
-
-    # Mem is in units of GB but our command and memory runtime values are in MB
-    Int machine_mem = if defined(mem_gb) then mem_gb * 1024 else default_ram_mb
+    Int disk_size_gb = ceil((size(reads_fasta, "GiB") * 2) + 1024)
 
     # ------------------------------------------------
     # Run our command:
@@ -1141,16 +1126,26 @@ task ConvertFastaToOneLineSequences {
         echo "Elapsed Time: $elapsedTime" >> ~{timing_output_file}
     >>>
 
-    # ------------------------------------------------
-    # Runtime settings:
-     runtime {
-         docker: "ubuntu:19.10"
-         memory: machine_mem + " MB"
-         disks: "local-disk " + select_first([disk_space_gb, default_disk_space_gb]) + if use_ssd then " SSD" else " HDD"
-         bootDiskSizeGb: select_first([boot_disk_size_gb, default_boot_disk_size_gb])
-         preemptible: select_first([preemptible_attempts, 0])
-         cpu: select_first([cpu, 1])
-     }
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             2,
+        disk_gb:            disk_size_gb,
+        boot_disk_gb:       10,
+        preemptible_tries:  3,
+        max_retries:        1,
+        docker:             "ubuntu:19.10"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
 
     # ------------------------------------------------
     # Outputs:
@@ -1189,7 +1184,7 @@ task Bamtools {
         boot_disk_gb:       10,
         preemptible_tries:  3,
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-utils:0.1.6"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-utils:0.1.9.beta"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {

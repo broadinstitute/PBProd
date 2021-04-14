@@ -76,6 +76,7 @@ workflow PB10xMasSeqArrayPreProcessing {
                 unaligned_bam = reads_bam,
                 unaligned_pbi = read_pbi,
                 prefix = SM + "_shard",
+                num_shards = 20,  # TODO: Remove this line after debugging is done!
                 runtime_attr_override = disable_preemption
         }
 
