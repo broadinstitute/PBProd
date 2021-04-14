@@ -225,7 +225,7 @@ task Discriminate
         # NOTE: the WDL glob() utility functions the same as bash globbing, so the order here should be the same:
         \ls ~{prefix}*.bam > tmp.txt
         while read file_name ; do
-            echo "$file_name" | sed "s#^~{prefix}_\(.*\).bam$##g"
+            echo "$file_name" | sed 's#^~{prefix}_\(.*\).bam$##g'
         done < tmp.txt >> file_model_list.txt
     >>>
 
