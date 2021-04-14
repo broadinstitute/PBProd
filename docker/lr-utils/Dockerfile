@@ -27,3 +27,13 @@ RUN git clone https://github.com/broadinstitute/gatk.git -b kvg_pbeap \
     && cp /gatk/build/libs/gatk-package-4.1.0.0-54-g47086b6-SNAPSHOT-local.jar /usr/local/bin/gatk.jar \
     && cd .. \
     && rm -rf /gatk
+
+# Install bamtools:
+RUN git clone git://github.com/pezmaster31/bamtools.git \
+    && cd bamtools \
+    && mkdir build && cd build \
+    && cmake .. \
+    && make \
+    && make install \
+    && cd ../../ \
+    && rm -rf bamtools

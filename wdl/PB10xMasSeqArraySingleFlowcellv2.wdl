@@ -261,7 +261,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             ## For some reason we need a LOT of memory for this.
             ## Need to debug it or remove the alignment of CCS (non-split) reads:
             RuntimeAttr align_ccs_reads_runtime_attrs = object {
-                mem_gb: 60,
+#                mem_gb: 60,
+                mem_gb: 32,
                 preemptible_tries: 0
             }
             call AR.Minimap2 as AlignCCSReads {
