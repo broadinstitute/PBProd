@@ -128,19 +128,37 @@ workflow PB10xMasSeqArrayPreProcessing {
 
         # Finalize our merged reads:
         String base_out_dir = outdir + "/" + DIR + "/" + WdlExecutionStartTimestamp.timestamp_string
-        call FF.FinalizeToDir as FinalizeModelSplitBams {
+        call FF.FinalizeToDir as FinalizeMas10SplitBam {
             input:
                 files = [
                     MergeMas10Bams.merged_bam,
                     MergeMas10Bams.merged_bai,
                     PbIndexMas10Bam.pbindex,
+                ],
+                outdir = base_out_dir + "/" + SM + "_mas10",
+                runtime_attr_override = disable_preemption
+        }
+        call FF.FinalizeToDir as FinalizeMas15SplitBam {
+            input:
+                files = [
                     MergeMas15Bams.merged_bam,
                     MergeMas15Bams.merged_bai,
                     PbIndexMas15Bam.pbindex,
                 ],
-                outdir = base_out_dir + "/" + SM,
+                outdir = base_out_dir + "/" + SM + "_mas15",
                 runtime_attr_override = disable_preemption
         }
-    }
 
+        # Copy over the metadata to our finalized folders so we can just run our workflow on it:
+        call PB.CopyMetadataFilesToNewDir as CopyMetadataForMas10Reads {
+            input:
+                input_gs_path = gcs_input_dir,
+                dest_gs_path = base_out_dir + "/" + SM + "_mas10"
+        }
+        call PB.CopyMetadataFilesToNewDir as CopyMetadataForMas15Reads {
+            input:
+                input_gs_path = gcs_input_dir,
+                dest_gs_path = base_out_dir + "/" + SM + "_mas15"
+        }
+    }
 }
