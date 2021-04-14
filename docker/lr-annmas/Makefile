@@ -1,5 +1,5 @@
 IMAGE_NAME = lr-annmas
-VERSION = 0.0.4
+VERSION = 0.0.5
 
 TAG1 = quay.io/broad-long-read-pipelines/$(IMAGE_NAME):$(VERSION)
 TAG2 = quay.io/broad-long-read-pipelines/$(IMAGE_NAME):latest
