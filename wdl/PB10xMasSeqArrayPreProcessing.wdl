@@ -41,6 +41,11 @@ workflow PB10xMasSeqArrayPreProcessing {
         sample_name : "[optional] The name of the sample to associate with the data in this workflow."
     }
 
+    # Create an object to disable preemption.  This should only be used for testing.
+    RuntimeAttr disable_preemption = object {
+        preemptible_tries:  0
+    }
+
     # Call our timestamp so we can store outputs without clobbering previous runs:
     call Utils.GetCurrentTimestampString as WdlExecutionStartTimestamp { input: }
 
@@ -70,7 +75,8 @@ workflow PB10xMasSeqArrayPreProcessing {
             input:
                 unaligned_bam = reads_bam,
                 unaligned_pbi = read_pbi,
-                prefix = SM + "_shard"
+                prefix = SM + "_shard",
+                runtime_attr_override = disable_preemption
         }
 
         scatter (sharded_reads in ShardLongReads.unmapped_shards) {
@@ -81,7 +87,8 @@ workflow PB10xMasSeqArrayPreProcessing {
                     bamfile = sharded_reads,
                     prefix = fbmrq_prefix + "_good_reads",
                     cmd = "filter",
-                    args = '-tag "rq":">=' + min_read_quality + '"'
+                    args = '-tag "rq":">=' + min_read_quality + '"',
+                    runtime_attr_override = disable_preemption
             }
 
             # 2 - split the reads by the model:
@@ -89,23 +96,34 @@ workflow PB10xMasSeqArrayPreProcessing {
             call ANNMAS.Discriminate as AssignReadsToModels {
                 input:
                     bam = FilterByMinReadQuality.bam_out,
-                    prefix = adis_prefix
+                    prefix = adis_prefix,
+                    runtime_attr_override = disable_preemption
             }
         }
         # TODO: Fix this to allow for an arbitrary number of models easily:
         call Utils.MergeBams as MergeMas10Bams {
             input:
                 bams = AssignReadsToModels.mas10_bam,
-                prefix = SM + "_mas10"
+                prefix = SM + "_mas10",
+                runtime_attr_override = disable_preemption
         }
-        call PB.PBIndex as PbIndexMas10Bam { input: bam = MergeMas10Bams.merged_bam }
+        call PB.PBIndex as PbIndexMas10Bam {
+            input:
+                bam = MergeMas10Bams.merged_bam,
+                runtime_attr_override = disable_preemption
+        }
 
         call Utils.MergeBams as MergeMas15Bams {
             input:
                 bams = AssignReadsToModels.mas15_bam,
-                prefix = SM + "_mas15"
+                prefix = SM + "_mas15",
+                runtime_attr_override = disable_preemption
         }
-        call PB.PBIndex as PbIndexMas15Bam { input: bam = MergeMas15Bams.merged_bam }
+        call PB.PBIndex as PbIndexMas15Bam {
+            input:
+                bam = MergeMas15Bams.merged_bam,
+                runtime_attr_override = disable_preemption
+        }
 
         # Finalize our merged reads:
         String base_out_dir = outdir + "/" + DIR + "/" + WdlExecutionStartTimestamp.timestamp_string
@@ -119,7 +137,8 @@ workflow PB10xMasSeqArrayPreProcessing {
                     MergeMas15Bams.merged_bai,
                     PbIndexMas15Bam.pbindex,
                 ],
-                outdir = base_out_dir + "/" + SM
+                outdir = base_out_dir + "/" + SM,
+                runtime_attr_override = disable_preemption
         }
     }
 
