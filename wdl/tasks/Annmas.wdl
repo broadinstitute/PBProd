@@ -258,3 +258,49 @@ task Discriminate
         docker:                 select_first([runtime_attr.docker,            default_attr.docker])
     }
 }
+
+task CheckForAnnotatedArrayReads {
+    input {
+        String bam
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    command <<<
+        set -euxo pipefail
+
+        gsutil cat ~{bam} | samtools view - | head -n1 | grep -q '[ \t]*SG:Z:'
+        r=$?
+        if [ $r -eq 1 ]; then
+            echo "false" > bam_has_annotations.txt
+        else
+            echo "true" > bam_has_annotations.txt
+        fi
+    >>>
+
+    output {
+        # TODO: Fix this to allow for an arbitrary number of models easily:
+        Boolean bam_has_annotations = read_boolean("bam_has_annotations.txt")
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,             # Decent amount of CPU and Memory because network transfer speed is proportional to VM "power"
+        mem_gb:             2,
+        disk_gb:            1,
+        boot_disk_gb:       10,
+        preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-align:0.1.26"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}

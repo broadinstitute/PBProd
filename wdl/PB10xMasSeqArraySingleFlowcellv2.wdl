@@ -126,6 +126,12 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             }
         }
 
+        # Check to see if we need to annotate our reads:
+        call ANNMAS.CheckForAnnotatedArrayReads {
+            input:
+                bam = reads_bam
+        }
+
         File read_pbi = sub(reads_bam, ".bam$", ".bam.pbi")
         call PB.ShardLongReads {
             input:
@@ -233,24 +239,29 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             scatter (corrected_shard in ShardCorrectedReads.unmapped_shards) {
 
-                call ANNMAS.Annotate as AnnotateReads {
-                    input:
-                        reads = corrected_shard,
-                        is_mas_seq_10_array = is_mas_seq_10_array
+                if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
+                    call ANNMAS.Annotate as AnnotateReads {
+                        input:
+                            reads = corrected_shard,
+                            is_mas_seq_10_array = is_mas_seq_10_array
+                    }
                 }
 
+                File annotated_file = if CheckForAnnotatedArrayReads.bam_has_annotations then corrected_shard else select_first([AnnotateReads.annotated_bam])
                 call ANNMAS.Segment as SegmentAnnotatedReads {
                     input:
-                        annotated_reads = AnnotateReads.annotated_bam,
+                        annotated_reads = annotated_file,
                         is_mas_seq_10_array = is_mas_seq_10_array
                 }
             }
 
             # Merge all outputs of Annmas Annotate / Segment:
-            call Utils.MergeBams as MergeAnnotatedReads_1 {
-                input:
-                    bams = AnnotateReads.annotated_bam,
-                    prefix = SM + "_AnnotatedReads_intermediate_1"
+            if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
+                call Utils.MergeBams as MergeAnnotatedReads_1 {
+                    input:
+                        bams = select_all(AnnotateReads.annotated_bam),
+                        prefix = SM + "_AnnotatedReads_intermediate_1"
+                }
             }
             call Utils.MergeBams as MergeArrayElements_1 {
                 input:
@@ -347,10 +358,12 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # Merge all sharded merged outputs from annotating / splitting:
-        call Utils.MergeBams as MergeAnnotatedReads_2 {
-            input:
-                bams = MergeAnnotatedReads_1.merged_bam,
-                prefix = SM + "_AnnotatedReads_intermediate_2"
+        if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
+            call Utils.MergeBams as MergeAnnotatedReads_2 {
+                input:
+                    bams = select_all(MergeAnnotatedReads_1.merged_bam),
+                    prefix = SM + "_AnnotatedReads_intermediate_2"
+            }
         }
         call Utils.MergeBams as MergeArrayElements_2 {
             input:
@@ -452,19 +465,22 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     # Merge all sharded merged sharded outputs for Annotation / Segmentation:
     # TODO: Fix SM[0] to be the right sample name if multiple samples are found.
-    call Utils.MergeBams as MergeAnnotatedReads_3 {
-        input:
-            bams = MergeAnnotatedReads_2.merged_bam,
-            prefix = SM[0] + ".AnnotatedReads"
+    if ( ! CheckForAnnotatedArrayReads.bam_has_annotations[0] ) {
+        call Utils.MergeBams as MergeAnnotatedReads_3 {
+            input:
+                bams = select_all(MergeAnnotatedReads_2.merged_bam),
+                prefix = SM[0] + ".AnnotatedReads"
+        }
+        call PB.PBIndex as PbIndexAnnotatedReads {
+            input:
+                bam = MergeAnnotatedReads_3.merged_bam
+        }
     }
+
     call Utils.MergeBams as MergeArrayElements_3 {
         input:
             bams = MergeArrayElements_2.merged_bam,
             prefix = SM[0] + ".ArrayElements"
-    }
-    call PB.PBIndex as PbIndexAnnotatedReads {
-        input:
-            bam = MergeAnnotatedReads_3.merged_bam
     }
     call PB.PBIndex as PbIndexArrayElements {
         input:
@@ -569,6 +585,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     ## NOTE: This assumes ONE file for both the raw input and the 10x array element stats!
     ##       This should be fixed in version 2.
+    File complete_annotated_bam = if (! CheckForAnnotatedArrayReads.bam_has_annotations[0] ) then select_first([MergeAnnotatedReads_3.merged_bam]) else top_level_bam_files[0]
     RuntimeAttr create_report_runtime_attrs = object {
             preemptible_tries:  0
     }
@@ -585,7 +602,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             array_element_bam_file           = MergeAnnotatedAlignedArrayElements.merged_bam,
             ccs_rejected_bam_file            = MergeAllCCSRejectedBams.merged_bam,
 
-            annotated_bam_file               = MergeAnnotatedReads_3.merged_bam,
+            annotated_bam_file               = complete_annotated_bam,
 
             zmw_subread_stats_file           = MergeShardedZmwSubreadStats.merged_tsv[0],
             polymerase_read_lengths_file     = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv[0],
@@ -624,19 +641,28 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     # Finalize all the Extracted Bounded Regions data:
     String annotatedReadsDir = base_out_dir + "/annmas"
-    call FF.FinalizeToDir as FinalizeAnnotatedReads {
+    call FF.FinalizeToDir as FinalizeAnnotatedArrayElements {
         input:
             files = [
-                MergeAnnotatedReads_3.merged_bam,
-                MergeAnnotatedReads_3.merged_bai,
-                PbIndexAnnotatedReads.pbindex,
-
                 MergeArrayElements_3.merged_bam,
                 MergeArrayElements_3.merged_bai,
                 PbIndexArrayElements.pbindex
             ],
             outdir = annotatedReadsDir,
             keyfile = GenerateStaticReport.html_report
+    }
+
+    if ( ! CheckForAnnotatedArrayReads.bam_has_annotations[0] ) {
+        call FF.FinalizeToDir as FinalizeAnnotatedReads {
+            input:
+                files = select_all([
+                    MergeAnnotatedReads_3.merged_bam,
+                    MergeAnnotatedReads_3.merged_bai,
+                    PbIndexAnnotatedReads.pbindex
+                ]),
+                outdir = annotatedReadsDir,
+                keyfile = GenerateStaticReport.html_report
+        }
     }
 
     # Finalize all the Quantification data:
