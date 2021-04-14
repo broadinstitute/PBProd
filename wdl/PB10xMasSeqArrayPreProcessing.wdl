@@ -105,7 +105,7 @@ workflow PB10xMasSeqArrayPreProcessing {
         call Utils.MergeBams as MergeMas10Bams {
             input:
                 bams = AssignReadsToModels.mas10_bam,
-                prefix = SM + "_mas10",
+                prefix = SM + "_mas10.reads",
                 runtime_attr_override = disable_preemption
         }
         call PB.PBIndex as PbIndexMas10Bam {
@@ -117,7 +117,7 @@ workflow PB10xMasSeqArrayPreProcessing {
         call Utils.MergeBams as MergeMas15Bams {
             input:
                 bams = AssignReadsToModels.mas15_bam,
-                prefix = SM + "_mas15",
+                prefix = SM + "_mas15.reads",
                 runtime_attr_override = disable_preemption
         }
         call PB.PBIndex as PbIndexMas15Bam {
