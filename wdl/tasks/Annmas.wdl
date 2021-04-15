@@ -267,8 +267,6 @@ task CheckForAnnotatedArrayReads {
     }
 
     command <<<
-        set -euxo pipefail
-
         gsutil cat ~{bam} | samtools view - | head -n1 | grep -q '[ \t]*SG:Z:'
         r=$?
         if [ $r -eq 1 ]; then
