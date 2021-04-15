@@ -137,7 +137,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 unaligned_bam = reads_bam,
                 unaligned_pbi = read_pbi,
-                prefix = SM + "_shard"
+                prefix = SM + "_shard",
+                num_shards = 50,
         }
 
         scatter (sharded_reads in ShardLongReads.unmapped_shards) {
@@ -234,7 +235,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 input:
                     unaligned_bam = ccs_bam,
                     unaligned_pbi = ccs_pbi,
-                    prefix = SM + "_subshard"
+                    prefix = SM + "_subshard",
+                    num_shards = 20,
             }
 
             scatter (corrected_shard in ShardCorrectedReads.unmapped_shards) {
