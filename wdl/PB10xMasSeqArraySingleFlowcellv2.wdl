@@ -595,6 +595,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         input:
             notebook_template                = jupyter_template_static,
 
+            sample_name                      = SM[0],
+
             subreads_stats                   = CalcSamStatsOnInputBam.raw_stats[0],
             ccs_reads_stats                  = AlignedCCSMetrics.sam_stats_raw_stats,
             array_elements_stats             = AlignedArrayElementMetrics.sam_stats_raw_stats,

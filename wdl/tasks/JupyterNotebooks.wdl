@@ -13,6 +13,8 @@ task PB10xMasSeqSingleFlowcellReport {
     input {
         File notebook_template
 
+        File sample_name
+
         File subreads_stats
         File ccs_reads_stats
         File array_elements_stats
@@ -39,6 +41,8 @@ task PB10xMasSeqSingleFlowcellReport {
 
     parameter_meta {
         notebook_template : "Jupyter notebook MASSeq template to run with the given data to produce a MASSeq report."
+
+        sample_name : "Name of the MAS-seq sample being analyzed in this report."
 
         subreads_stats : "Samtools stats file created from the raw subreads from the PacBio instrument."
         ccs_reads_stats : "Samtools raw stats file created from the aligned CCS corrected reads from the PacBio instrument."
@@ -116,6 +120,8 @@ task PB10xMasSeqSingleFlowcellReport {
 
         # Prepare the config file:
         rm -f mas-seq_qc_inputs.config
+
+        echo "~{sample_name}" >> mas-seq_qc_inputs.config
 
         echo "~{subreads_stats}" >> mas-seq_qc_inputs.config
         echo "~{ccs_reads_stats}" >> mas-seq_qc_inputs.config
