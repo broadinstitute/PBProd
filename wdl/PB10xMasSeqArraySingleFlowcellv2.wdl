@@ -271,22 +271,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     prefix = SM + "_ArrayElements_intermediate_1"
             }
 
-            ## For some reason we need a LOT of memory for this.
-            ## Need to debug it or remove the alignment of CCS (non-split) reads:
-            RuntimeAttr align_ccs_reads_runtime_attrs = object {
-#                mem_gb: 60,
-                mem_gb: 32,
-                preemptible_tries: 0
-            }
-            call AR.Minimap2 as AlignCCSReads {
-                input:
-                    reads      = [ ccs_bam ],
-                    ref_fasta  = ref_fasta,
-                    RG         = RG_consensus,
-                    map_preset = "splice",
-                    runtime_attr_override = align_ccs_reads_runtime_attrs
-            }
-
             # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
             if (is_SIRV_data) {
                 call TENX.TagSirvUmiPositionsFromAnnmasAnnotatedArrayElement {
@@ -325,11 +309,26 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     map_preset = "splice"
             }
 
+            call AR.Minimap2 as AlignArrayElementsToGenome {
+                input:
+                    reads      = [ annotatedReads ],
+                    ref_fasta  = ref_fasta,
+                    RG         = RG_consensus,
+                    map_preset = "splice"
+            }
+
             # We need to restore the annotations we created with the 10x tool to the aligned reads.
             call TENX.RestoreAnnotationstoAlignedBam {
                 input:
                     annotated_bam_file = annotatedReads,
                     aligned_bam_file = AlignArrayElements.aligned_bam
+            }
+
+            # We need to restore the annotations we created with the 10x tool to the aligned reads.
+            call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToGenomeAlignedBam {
+                input:
+                    annotated_bam_file = annotatedReads,
+                    aligned_bam_file = AlignArrayElementsToGenome.aligned_bam
             }
 
             # To properly count our transcripts we must throw away the non-primary and unaligned reads:
@@ -422,7 +421,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # Merge all CCS bams together for this Subread BAM:
-        call Utils.MergeBams as MergeAlignedChunks { input: bams = AlignCCSReads.aligned_bam }
+        call Utils.MergeBams as MergeGenomeAlignedArrayElementChunk { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam }
 
         # Merge all CCS reports together for this Subread BAM:
         Array[File] ccs_reports_to_merge = if use_subreads then select_all(CCS.report) else select_all(FindCCSReport.ccs_report)
@@ -518,7 +517,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     }
 
     # Merge all aligned CCS bams together for this flowcell:
-    call Utils.MergeBams as MergeAllAlignedCCSBams { input: bams = MergeAlignedChunks.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.aligned.ccs" }
+    call Utils.MergeBams as MergeAllAlignedCCSBams { input: bams = MergeGenomeAlignedArrayElementChunk.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.genome_aligned.Annotated.ArrayElements" }
 
     # Merge all CCS bams together for this flowcell:
     call Utils.MergeBams as MergeAllCCSBams { input: bams = MergeChunks.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.ccs" }
@@ -581,6 +580,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             base_metrics_out_dir = metrics_out_dir + "/aligned_array_element_metrics"
     }
 
+    # If we aren't using subreads, all the CCS reports are the same and we should not merge them!
+    File final_ccs_report = if use_subreads then MergeAllCCSReports.report else select_first(flatten(FindCCSReport.ccs_report))
+
     ##########
     # Create Report:
     ##########
@@ -600,7 +602,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             subreads_stats                   = CalcSamStatsOnInputBam.raw_stats[0],
             ccs_reads_stats                  = AlignedCCSMetrics.sam_stats_raw_stats,
             array_elements_stats             = AlignedArrayElementMetrics.sam_stats_raw_stats,
-            ccs_report_file                  = MergeAllCCSReports.report,
+            ccs_report_file                  = final_ccs_report,
 
             ccs_bam_file                     = MergeAllCCSBams.merged_bam,
             array_element_bam_file           = MergeAnnotatedAlignedArrayElements.merged_bam,
@@ -763,7 +765,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     call FF.FinalizeToDir as FinalizeCCSMetrics {
         input:
-            files = [ MergeAllCCSReports.report ],
+            files = [ final_ccs_report ],
             outdir = metrics_out_dir + "/ccs_metrics",
             keyfile = GenerateStaticReport.html_report
     }
