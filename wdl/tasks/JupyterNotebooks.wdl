@@ -13,7 +13,7 @@ task PB10xMasSeqSingleFlowcellReport {
     input {
         File notebook_template
 
-        File sample_name
+        String sample_name
 
         File subreads_stats
         File ccs_reads_stats
