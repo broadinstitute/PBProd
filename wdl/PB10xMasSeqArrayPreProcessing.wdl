@@ -27,7 +27,11 @@ workflow PB10xMasSeqArrayPreProcessing {
         String gcs_input_dir
         String gcs_out_root_dir = "gs://broad-dsde-methods-long-reads-outgoing/PB10xMasSeqArrayPreProcessing"
 
-        Float min_read_quality = 0.99
+        # Default here is 0 because ccs uncorrected reads all seem to have RQ = -1.
+        # All pathologically long reads also have RQ = -1.
+        # This way we preserve the vast majority of the data, even if it has low quality.
+        # We can filter it out at later steps.
+        Float min_read_quality = 0.0
 
         String? sample_name
     }
@@ -36,7 +40,7 @@ workflow PB10xMasSeqArrayPreProcessing {
         gcs_input_dir : "Input folder on GCS in which to search for BAM files to process."
         gcs_out_root_dir : "Root output GCS folder in which to place results of this workflow."
 
-        min_read_quality : "[optional] Min quality necessary to include a read."
+        min_read_quality : "[optional] Min quality necessary to include a read.  Sequel IIe CCS uncorrected reads all seem to have RQ = -1.  All pathologically long reads also seem to have RQ = -1 (this makes sense given that the pathologically long reads I've seen are all reads that failed CCS).  (default: 0.0)."
 
         sample_name : "[optional] The name of the sample to associate with the data in this workflow."
     }
@@ -80,6 +84,7 @@ workflow PB10xMasSeqArrayPreProcessing {
         }
 
         scatter (sharded_reads in ShardLongReads.unmapped_shards) {
+
             # 1 - filter the reads by the minimum read quality:
             String fbmrq_prefix = basename(sharded_reads, ".bam")
             call Utils.Bamtools as FilterByMinReadQuality {
