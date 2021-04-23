@@ -10,7 +10,7 @@ import "tasks/ReadsMetrics.wdl" as RM
 import "tasks/AlignedMetrics.wdl" as AM
 import "tasks/Ten_X_Tool.wdl" as TENX
 import "tasks/JupyterNotebooks.wdl" as JUPYTER
-import "tasks/Annmas.wdl" as ANNMAS
+import "tasks/Longbow.wdl" as LONGBOW
 
 import "tasks/TranscriptAnalysis/UMI_Tools.wdl" as UMI_TOOLS
 import "tasks/TranscriptAnalysis/Postprocessing_Tasks.wdl" as TX_POST
@@ -127,7 +127,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # Check to see if we need to annotate our reads:
-        call ANNMAS.CheckForAnnotatedArrayReads {
+        call LONGBOW.CheckForAnnotatedArrayReads {
             input:
                 bam = reads_bam
         }
@@ -242,7 +242,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             scatter (corrected_shard in ShardCorrectedReads.unmapped_shards) {
 
                 if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
-                    call ANNMAS.Annotate as AnnotateReads {
+                    call LONGBOW.Annotate as AnnotateReads {
                         input:
                             reads = corrected_shard,
                             is_mas_seq_10_array = is_mas_seq_10_array
@@ -250,14 +250,14 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 }
 
                 File annotated_file = if CheckForAnnotatedArrayReads.bam_has_annotations then corrected_shard else select_first([AnnotateReads.annotated_bam])
-                call ANNMAS.Segment as SegmentAnnotatedReads {
+                call LONGBOW.Segment as SegmentAnnotatedReads {
                     input:
                         annotated_reads = annotated_file,
                         is_mas_seq_10_array = is_mas_seq_10_array
                 }
             }
 
-            # Merge all outputs of Annmas Annotate / Segment:
+            # Merge all outputs of Longbow Annotate / Segment:
             if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
                 call Utils.MergeBams as MergeAnnotatedReads_1 {
                     input:
@@ -273,7 +273,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
             if (is_SIRV_data) {
-                call TENX.TagSirvUmiPositionsFromAnnmasAnnotatedArrayElement {
+                call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
                     input:
                         bam_file = MergeArrayElements_1.merged_bam,
                         prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
@@ -298,7 +298,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
             # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
             # output to `File?` instead of `File`
-            File annotatedReads = if is_SIRV_data then select_first([TagSirvUmiPositionsFromAnnmasAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
+            File annotatedReads = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
 
             # Align our array elements:
             call AR.Minimap2 as AlignArrayElements {
@@ -646,7 +646,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     }
 
     # Finalize all the Extracted Bounded Regions data:
-    String annotatedReadsDir = base_out_dir + "/annmas"
+    String annotatedReadsDir = base_out_dir + "/longbow"
     call FF.FinalizeToDir as FinalizeAnnotatedArrayElements {
         input:
             files = [

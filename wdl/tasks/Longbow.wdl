@@ -7,7 +7,7 @@ task Annotate
     input {
         File reads
         Boolean is_mas_seq_10_array = false
-        String prefix = "annmas_annotated"
+        String prefix = "longbow_annotated"
 
         RuntimeAttr? runtime_attr_override
     }
@@ -19,8 +19,8 @@ task Annotate
     command <<<
         set -euxo pipefail
 
-        source /annmas/venv/bin/activate
-        annmas annotate -t8 -v INFO ~{reads} ~{model_spec_arg} -o ~{prefix}.bam
+        source /longbow/venv/bin/activate
+        longbow annotate -t8 -v INFO ~{reads} ~{model_spec_arg} -o ~{prefix}.bam
     >>>
 
     output {
@@ -35,7 +35,7 @@ task Annotate
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-annmas:0.0.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -54,7 +54,7 @@ task Segment
     input {
         File annotated_reads
         Boolean is_mas_seq_10_array = false
-        String prefix = "annmas_segmented"
+        String prefix = "longbow_segmented"
 
         RuntimeAttr? runtime_attr_override
     }
@@ -65,8 +65,8 @@ task Segment
     command <<<
         set -euxo pipefail
 
-        source /annmas/venv/bin/activate
-        annmas segment -v INFO -s ~{annotated_reads} ~{model_spec_arg} -o ~{prefix}.bam
+        source /longbow/venv/bin/activate
+        longbow segment -v INFO -s ~{annotated_reads} ~{model_spec_arg} -o ~{prefix}.bam
     >>>
 
     output {
@@ -81,7 +81,7 @@ task Segment
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-annmas:0.0.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -119,8 +119,8 @@ task ScSplit
     command <<<
         set -euxo pipefail
 
-        source /annmas/venv/bin/activate
-        annmas scsplit -t4 -v INFO ~{model_spec_arg} -b ~{force_option} -o ~{prefix} -u ~{umi_length} -c ~{cbc_dummy} ~{reads_bam}
+        source /longbow/venv/bin/activate
+        longbow scsplit -t4 -v INFO ~{model_spec_arg} -b ~{force_option} -o ~{prefix} -u ~{umi_length} -c ~{cbc_dummy} ~{reads_bam}
     >>>
 
     output {
@@ -138,7 +138,7 @@ task ScSplit
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-annmas:0.0.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -161,7 +161,7 @@ task Inspect
         File read_names
 
         Boolean is_mas_seq_10_array = false
-        String prefix = "annmas_inspected_reads"
+        String prefix = "longbow_inspected_reads"
 
         RuntimeAttr? runtime_attr_override
     }
@@ -172,8 +172,8 @@ task Inspect
     command <<<
         set -euxo pipefail
 
-        source /annmas/venv/bin/activate
-        annmas inspect ~{model_spec_arg} ~{reads} -p ~{reads_pbi} -r ~{read_names} -o ~{prefix}
+        source /longbow/venv/bin/activate
+        longbow inspect ~{model_spec_arg} ~{reads} -p ~{reads_pbi} -r ~{read_names} -o ~{prefix}
         tar -zxf ~{prefix}.tar.gz ~{prefix}
     >>>
 
@@ -189,7 +189,7 @@ task Inspect
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-annmas:0.0.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -207,7 +207,7 @@ task Discriminate
 {
     input {
         File bam
-        String prefix = "annmas_discriminate"
+        String prefix = "longbow_discriminate"
 
         RuntimeAttr? runtime_attr_override
     }
@@ -217,8 +217,8 @@ task Discriminate
     command <<<
         set -euxo pipefail
 
-        source /annmas/venv/bin/activate
-        annmas discriminate -v INFO ~{bam} -o ~{prefix}
+        source /longbow/venv/bin/activate
+        longbow discriminate -v INFO ~{bam} -o ~{prefix}
 
         # Create a list of models - one for each bam file created:
         # Do this safely (assume there can be spaces in the names even though this is generally bad form).
@@ -245,7 +245,7 @@ task Discriminate
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-annmas:0.0.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {

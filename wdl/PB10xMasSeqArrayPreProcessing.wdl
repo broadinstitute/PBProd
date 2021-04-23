@@ -3,17 +3,7 @@ version 1.0
 import "tasks/PBUtils.wdl" as PB
 import "tasks/Utils.wdl" as Utils
 import "tasks/Finalize.wdl" as FF
-import "tasks/AlignReads.wdl" as AR
-import "tasks/Cartographer.wdl" as CART
-import "tasks/TranscriptAnalysis/Flair_Tasks.wdl" as ISO
-import "tasks/ReadsMetrics.wdl" as RM
-import "tasks/AlignedMetrics.wdl" as AM
-import "tasks/Ten_X_Tool.wdl" as TENX
-import "tasks/JupyterNotebooks.wdl" as JUPYTER
-import "tasks/Annmas.wdl" as ANNMAS
-
-import "tasks/TranscriptAnalysis/UMI_Tools.wdl" as UMI_TOOLS
-import "tasks/TranscriptAnalysis/Postprocessing_Tasks.wdl" as TX_POST
+import "tasks/Longbow.wdl" as LONGBOW
 
 workflow PB10xMasSeqArrayPreProcessing {
 
@@ -98,7 +88,7 @@ workflow PB10xMasSeqArrayPreProcessing {
 
             # 2 - split the reads by the model:
             String adis_prefix = basename(FilterByMinReadQuality.bam_out, ".bam")
-            call ANNMAS.Discriminate as AssignReadsToModels {
+            call LONGBOW.Discriminate as AssignReadsToModels {
                 input:
                     bam = FilterByMinReadQuality.bam_out,
                     prefix = adis_prefix,

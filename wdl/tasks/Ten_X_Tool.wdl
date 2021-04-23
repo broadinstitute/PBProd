@@ -422,7 +422,7 @@ task CopyContigNameToReadTag {
 }
 
 
-task TagSirvUmiPositionsFromAnnmasAnnotatedArrayElement {
+task TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
     meta {
         description : "Extracts the UMI from each read in the given bam file into the ZU tag."
         author : "Jonn Smith"
