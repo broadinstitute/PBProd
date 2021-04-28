@@ -305,7 +305,7 @@ task Filter {
     input {
         File bam
 
-        String prefix = "longbow_filter"
+        String prefix = "reads"
         Boolean is_mas_seq_10_array = false
 
         File? bam_pbi
@@ -324,8 +324,8 @@ task Filter {
     >>>
 
     output {
-        File passed_bam = "~{prefix}_longbow_filter_passed.bam"
-        File failed_bam = "~{prefix}_longbow_filter_failed.bam"
+        File passed_reads = "~{prefix}_longbow_filter_passed.bam"
+        File failed_reads = "~{prefix}_longbow_filter_failed.bam"
     }
 
     #########################

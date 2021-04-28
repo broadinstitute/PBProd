@@ -40,11 +40,11 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         File ref_fasta_dict = "gs://broad-dsde-methods-long-reads/resources/references/grch38/Homo_sapiens_assembly38.dict"
 
         # NOTE: Reference for array elements:
-        File transcriptome_ref_fasta =  "gs://broad-dsde-methods-long-reads/resources/gencode_v34/gencode.v34.pc_transcripts.fa"
-        File transcriptome_ref_fasta_index = "gs://broad-dsde-methods-long-reads/resources/gencode_v34/gencode.v34.pc_transcripts.fa.fai"
-        File transcriptome_ref_fasta_dict = "gs://broad-dsde-methods-long-reads/resources/gencode_v34/gencode.v34.pc_transcripts.dict"
+        File transcriptome_ref_fasta =  "gs://broad-dsde-methods-long-reads/resources/gencode_v37/gencode.v37.pc_transcripts.fa"
+        File transcriptome_ref_fasta_index = "gs://broad-dsde-methods-long-reads/resources/gencode_v37/gencode.v37.pc_transcripts.fa.fai"
+        File transcriptome_ref_fasta_dict = "gs://broad-dsde-methods-long-reads/resources/gencode_v37/gencode.v37.pc_transcripts.dict"
 
-        File genome_annotation_gtf = "gs://broad-dsde-methods-long-reads/resources/gencode_v34/gencode.v34.primary_assembly.annotation.gtf"
+        File genome_annotation_gtf = "gs://broad-dsde-methods-long-reads/resources/gencode_v37/gencode.v37.primary_assembly.annotation.gtf"
 
         File jupyter_template_static = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/MAS-seq_QC_report_template-static.ipynb"
         File workflow_dot_file = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/PB10xMasSeqArraySingleFlowcellv2.dot"
@@ -190,28 +190,12 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                             subreads = subsharded_subreads,
                             prefix = SM + "_zmw_subread_stats"
                     }
-
-                    # Get approximate subread array lengths here:
-                    call CART.GetApproxRawSubreadArrayLengths as GetApproxRawSubreadArrayLengths_subsharded {
-                        input:
-                            reads_file = subsharded_subreads,
-                            delimiters_fasta = segments_fasta,
-                            min_qual = 7.0,
-                            ignore_seqs = ["Poly_A", "Poly_T", "3_prime_TSO", "5_prime_TSO"],
-                            prefix = SM + "_approx_raw_subread_array_lengths"
-                    }
                 }
 
                 # Merge our micro-shards of subread stats:
                 call Utils.MergeTsvFiles as MergeMicroShardedZmwSubreadStats {
                     input:
                         tsv_files = CollectZmwSubreadStats_subsharded.zmw_subread_stats
-                }
-
-                # Merge the micro-sharded raw subread array element counts:
-                call Utils.MergeTsvFiles as MergeMicroShardedRawSubreadArrayElementCounts {
-                    input:
-                        tsv_files = GetApproxRawSubreadArrayLengths_subsharded.approx_subread_array_lengths
                 }
             }
             if (!use_subreads) {
@@ -255,6 +239,26 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                         annotated_reads = annotated_file,
                         is_mas_seq_10_array = is_mas_seq_10_array
                 }
+
+                # Get the reads that conform to the model, and those that do not:
+                call LONGBOW.Filter as FilterAnnotatedReadsByLongbowModel {
+                    input:
+                        bam = annotated_file,
+                        prefix = SM + "_subshard",
+                        is_mas_seq_10_array = is_mas_seq_10_array
+                }
+            }
+
+            # Merge all filtered bams together:
+            call Utils.MergeBams as MergeLongbowFilterPassedReads_subshards {
+                input:
+                    bams = FilterAnnotatedReadsByLongbowModel.passed_reads,
+                    prefix = SM + "_LongbowFilter_Passed_1"
+            }
+            call Utils.MergeBams as MergeLongbowFilterFailedReads_subshards {
+                input:
+                    bams = FilterAnnotatedReadsByLongbowModel.failed_reads,
+                    prefix = SM + "_LongbowFilter_Failed_1"
             }
 
             # Merge all outputs of Longbow Annotate / Segment:
@@ -379,13 +383,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     tsv_files = select_all(MergeMicroShardedZmwSubreadStats.merged_tsv),
                     prefix = SM + "_zmw_subread_stats"
             }
-
-            # Merge the sharded raw subread array element counts:
-            call Utils.MergeTsvFiles as MergeShardedRawSubreadArrayElementCounts {
-                input:
-                    tsv_files = select_all(MergeMicroShardedRawSubreadArrayElementCounts.merged_tsv),
-                    prefix = SM + "_approx_subread_array_lengths"
-            }
         }
 
         # Merge the reads we shall use for quantification:
@@ -393,6 +390,18 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 bams = CopyContigNameToReadTag.output_bam,
                 prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs_intermediate_2"
+        }
+
+        # Merge the longbow filtered reads:
+        call Utils.MergeBams as MergeLongbowFilterPassedReads_2 {
+            input:
+                bams = MergeLongbowFilterPassedReads_subshards.merged_bam,
+                prefix = SM + "_LongbowFilter_Passed_2"
+        }
+        call Utils.MergeBams as MergeLongbowFilterFailedReads_2 {
+            input:
+                bams = MergeLongbowFilterFailedReads_subshards.merged_bam,
+                prefix = SM + "_LongbowFilter_Failed_2"
         }
 
         # Merge the 10x stats:
@@ -492,6 +501,18 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         input:
             bams = MergeShardedArrayElementsForQuant.merged_bam,
             prefix = SM[0] + ".Annotated.ArrayElements.ForQuant"
+    }
+
+    # Merge the longbow filtered reads:
+    call Utils.MergeBams as MergeLongbowFilterPassedReads_3 {
+        input:
+            bams = MergeLongbowFilterPassedReads_2.merged_bam,
+            prefix = SM[0] + "_LongbowFilter_Passed"
+    }
+    call Utils.MergeBams as MergeLongbowFilterFailedReads_3 {
+        input:
+            bams = MergeLongbowFilterFailedReads_2.merged_bam,
+            prefix = SM[0] + "_LongbowFilter_Failed"
     }
 
     # Merge the 10x merged stats:
@@ -612,7 +633,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             zmw_subread_stats_file           = MergeShardedZmwSubreadStats.merged_tsv[0],
             polymerase_read_lengths_file     = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv[0],
-            approx_raw_subread_array_lengths = MergeShardedRawSubreadArrayElementCounts.merged_tsv[0],
 
             ten_x_metrics_file               = Merge10XStats_2.merged_tsv,
             is_mas_seq_10_array              = is_mas_seq_10_array,
@@ -749,6 +769,16 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             keyfile = GenerateStaticReport.html_report
     }
 
+    call FF.FinalizeToDir as FinalizeLongbowFilteredBams {
+        input:
+            files = [
+                    MergeLongbowFilterPassedReads_3.merged_bam, MergeLongbowFilterPassedReads_3.merged_bai,
+                    MergeLongbowFilterFailedReads_3.merged_bam, MergeLongbowFilterFailedReads_3.merged_bai,
+            ],
+            outdir = base_out_dir + "/merged_bams/unaligned",
+            keyfile = GenerateStaticReport.html_report
+    }
+
     call FF.FinalizeToDir as FinalizeAlignedCCSBams {
         input:
             files = [ MergeAllAlignedCCSBams.merged_bam, MergeAllAlignedCCSBams.merged_bai ],
@@ -793,13 +823,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     select_first([MergeAllCCSRejectedBams.merged_bai])
                 ],
                 outdir = base_out_dir + "/merged_bams/ccs_rejected",
-                keyfile = GenerateStaticReport.html_report
-        }
-
-        call FF.FinalizeToDir as FinalizeRawSubreadArrayElementCounts {
-            input:
-                files = select_all(MergeShardedRawSubreadArrayElementCounts.merged_tsv),
-                outdir = metrics_out_dir + "/array_stats",
                 keyfile = GenerateStaticReport.html_report
         }
     }
