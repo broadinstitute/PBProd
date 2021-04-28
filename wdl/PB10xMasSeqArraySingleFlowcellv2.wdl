@@ -304,34 +304,43 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             # output to `File?` instead of `File`
             File annotatedReads = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
 
+            # Grab only the coding regions of the annotated reads for our alignments:
+            Int extract_start_offset = if is_SIRV_data then 8 else 26
+            call LONGBOW.Extract as ExtractCodingRegionsFromArrayElements {
+                input:
+                    bam = annotatedReads,
+                    start_offset = extract_start_offset,
+                    prefix = SM + "_ArrayElements_Coding_Regions_Only"
+            }
+
             # Align our array elements:
             call AR.Minimap2 as AlignArrayElements {
                 input:
-                    reads      = [ annotatedReads ],
+                    reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
                     ref_fasta  = transcriptome_ref_fasta,
                     RG         = RG_array_elements,
-                    map_preset = "splice"
+                    map_preset = "splice:hq"
             }
 
             call AR.Minimap2 as AlignArrayElementsToGenome {
                 input:
-                    reads      = [ annotatedReads ],
+                    reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
                     ref_fasta  = ref_fasta,
                     RG         = RG_consensus,
-                    map_preset = "splice"
+                    map_preset = "splice:hq"
             }
 
             # We need to restore the annotations we created with the 10x tool to the aligned reads.
             call TENX.RestoreAnnotationstoAlignedBam {
                 input:
-                    annotated_bam_file = annotatedReads,
+                    annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
                     aligned_bam_file = AlignArrayElements.aligned_bam
             }
 
             # We need to restore the annotations we created with the 10x tool to the aligned reads.
             call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToGenomeAlignedBam {
                 input:
-                    annotated_bam_file = annotatedReads,
+                    annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
                     aligned_bam_file = AlignArrayElementsToGenome.aligned_bam
             }
 

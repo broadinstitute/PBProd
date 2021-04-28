@@ -35,7 +35,7 @@ task Annotate
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -81,7 +81,7 @@ task Segment
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -138,7 +138,7 @@ task ScSplit
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -189,7 +189,7 @@ task Inspect
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -243,7 +243,7 @@ task Discriminate
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -313,14 +313,20 @@ task Filter {
         RuntimeAttr? runtime_attr_override
     }
 
+    String pbi_arg = if defined(bam_pbi) then " --pbi " else ""
     String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
-    Int disk_size = 4*ceil(size(bam, "GB"))
+    Int disk_size = 4*ceil(size(bam, "GB")) + size(bam_pbi, "GB")
 
     command <<<
         set -euxo pipefail
 
         source /longbow/venv/bin/activate
-        longbow filter -v INFO ~{model_spec_arg} ~{bam} -o ~{prefix}
+        longbow filter \
+            -v INFO \
+            ~{pbi_arg}~{default="" sep=" --pbi " bam_pbi} \
+            ~{model_spec_arg} \
+            ~{bam} \
+            -o ~{prefix}
     >>>
 
     output {
@@ -336,7 +342,68 @@ task Filter {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.0.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.0"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}
+
+
+task Extract {
+    input {
+        File bam
+
+        Int start_offset = 16+10
+        Int base_padding = 2
+        String leading_adapter = "10x_Adapter"
+        String trailing_adapter = "Poly_A"
+
+        String prefix = "reads"
+
+        File? bam_pbi
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Int disk_size = 4*ceil(size(bam, "GB")) + size(bam_pbi, "GB")
+    String pbi_arg = if defined(bam_pbi) then " --pbi " else ""
+
+    command <<<
+        set -euxo pipefail
+
+        source /longbow/venv/bin/activate
+        longbow extract \
+            -v INFO \
+            --start-offset ~{start_offset} \
+            --base-padding ~{base_padding} \
+            --leading-adapter ~{leading_adapter} \
+            --trailing-adapter ~{trailing_adapter} \
+            ~{pbi_arg}~{default="" sep=" --pbi " bam_pbi} \
+            ~{bam} \
+            -o ~{prefix}.bam
+    >>>
+
+    output {
+        File extracted_reads = "~{prefix}.bam"
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          2,
+        mem_gb:             16,
+        disk_gb:            disk_size,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
