@@ -315,7 +315,7 @@ task Filter {
 
     String pbi_arg = if defined(bam_pbi) then " --pbi " else ""
     String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
-    Int disk_size = 4*ceil(size(bam, "GB")) + size(bam_pbi, "GB")
+    Int disk_size = ceil(4*ceil(size(bam, "GB")) + size(bam_pbi, "GB"))
 
     command <<<
         set -euxo pipefail
@@ -373,7 +373,7 @@ task Extract {
         RuntimeAttr? runtime_attr_override
     }
 
-    Int disk_size = 4*ceil(size(bam, "GB")) + size(bam_pbi, "GB")
+    Int disk_size = ceil(4*ceil(size(bam, "GB")) + size(bam_pbi, "GB"))
     String pbi_arg = if defined(bam_pbi) then " --pbi " else ""
 
     command <<<
