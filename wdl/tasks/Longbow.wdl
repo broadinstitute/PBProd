@@ -326,12 +326,13 @@ task Filter {
             ~{pbi_arg}~{default="" sep=" --pbi " bam_pbi} \
             ~{model_spec_arg} \
             ~{bam} \
-            -o ~{prefix}
+            -o ~{prefix} 2> >(tee longbow_filter_log.txt >&2) # Get log data from stderr and reprint to stderr
     >>>
 
     output {
         File passed_reads = "~{prefix}_longbow_filter_passed.bam"
         File failed_reads = "~{prefix}_longbow_filter_failed.bam"
+        File log = "longbow_filter_log.txt"
     }
 
     #########################
@@ -388,11 +389,12 @@ task Extract {
             --trailing-adapter ~{trailing_adapter} \
             ~{pbi_arg}~{default="" sep=" --pbi " bam_pbi} \
             ~{bam} \
-            -o ~{prefix}.bam
+            -o ~{prefix}.bam 2> >(tee longbow_extract_log.txt >&2) # Get log data from stderr and reprint to stderr
     >>>
 
     output {
         File extracted_reads = "~{prefix}.bam"
+        File log = "longbow_extract_log.txt"
     }
 
     #########################
