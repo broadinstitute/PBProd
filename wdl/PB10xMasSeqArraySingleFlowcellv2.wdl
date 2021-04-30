@@ -784,7 +784,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     MergeLongbowFilterPassedReads_3.merged_bam, MergeLongbowFilterPassedReads_3.merged_bai,
                     MergeLongbowFilterFailedReads_3.merged_bam, MergeLongbowFilterFailedReads_3.merged_bai,
             ],
-            outdir = base_out_dir + "/merged_bams/unaligned",
+            outdir = annotatedReadsDir,
             keyfile = GenerateStaticReport.html_report
     }
 
