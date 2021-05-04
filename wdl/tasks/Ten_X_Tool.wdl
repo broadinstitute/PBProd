@@ -287,7 +287,7 @@ task RestoreAnnotationstoAlignedBam {
     Boolean use_ssd = false
 
     # You may have to change the following two parameter values depending on the task requirements
-    Int default_ram_mb = 16 * 1024
+    Int default_ram_mb = 32 * 1024
 
     Float reads_size_gb = size(annotated_bam_file, "GiB") + size(aligned_bam_file, "GiB")
     Int default_disk_space_gb = ceil((reads_size_gb * 3) + 20)
@@ -299,9 +299,22 @@ task RestoreAnnotationstoAlignedBam {
 
     String timing_output_file = "timingInformation.txt"
 
+    String memory_log_file = "memory_use.txt"
     String output_name = basename(aligned_bam_file, ".bam") + ".AnnotationsRestored.bam"
 
     command {
+
+        # Set up memory logging daemon:
+        MEM_LOG_INTERVAL_s=5
+        DO_MEMORY_LOG=true
+        while $DO_MEMORY_LOG ; do
+            date
+            date +%s
+            cat /proc/meminfo
+            sleep $MEM_LOG_INTERVAL_s
+        done >> ~{memory_log_file} &
+        mem_pid=$!
+
         set -e
         startTime=`date +%s.%N`
         echo "StartTime: $startTime" > ~{timing_output_file}
@@ -315,6 +328,15 @@ task RestoreAnnotationstoAlignedBam {
 
         endTime=`date +%s.%N`
         echo "EndTime: $endTime" >> ~{timing_output_file}
+
+        # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
+        set +e
+        DO_MEMORY_LOG=false
+        sleep $(($MEM_LOG_INTERVAL_s  * 2))
+        kill -0 $mem_pid &> /dev/null
+        if [ $? -ne 0 ] ; then
+            kill -9 $mem_pid
+        fi
 
         # Get and compute timing information:
         set +e
@@ -339,6 +361,7 @@ task RestoreAnnotationstoAlignedBam {
     output {
       File output_bam        = "~{output_name}"
       File timing_info       = "~{timing_output_file}"
+      File memory_info       = "~{memory_log_file}"
     }
 }
 

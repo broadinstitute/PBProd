@@ -33,7 +33,6 @@ def main(bam_name, aligned_bam_name, out_bam_name):
         unit=" read",
         file=sys.stderr
     ) as pbar:
-
         for read in bam_file:
             tags_to_keep = []
             if len(tag_names) == 0:
