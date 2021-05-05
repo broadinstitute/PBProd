@@ -26,6 +26,9 @@ task PB10xMasSeqSingleFlowcellReport {
 
         File annotated_bam_file
 
+        File longbow_passed_reads_file
+        File longbow_failed_reads_file
+
         File? zmw_subread_stats_file
         File? polymerase_read_lengths_file
         File? approx_raw_subread_array_lengths
@@ -55,6 +58,9 @@ task PB10xMasSeqSingleFlowcellReport {
         ccs_rejected_bam_file : "[optional] Bam file containing all subreads from zmws that were rejected by CCS."
 
         annotated_bam_file : "Bam file containing ccs corrected reads with annotated sections in the SG tag."
+
+        longbow_passed_reads_file : "Bam file containing ccs corrected reads that passed the longbow filter for the model used in this run."
+        longbow_failed_reads_file : "Bam file containing ccs corrected reads that failed the longbow filter for the model used in this run."
 
         zmw_subread_stats_file : "[optional] File containing statistics about the subreads from each ZMW (created by collect_zmw_subread_stats.py in the PBUtils docker container)."
         polymerase_read_lengths_file : "[optional] File containing the lengths of each polymerase read from the sequencer (as created by collect_polymerase_read_lengths.py)"
@@ -133,6 +139,9 @@ task PB10xMasSeqSingleFlowcellReport {
         echo "~{ccs_rejected_bam_file_name}" >> mas-seq_qc_inputs.config
 
         echo "~{annotated_bam_file}" >> mas-seq_qc_inputs.config
+
+        echo "~{longbow_passed_reads_file}" >> mas-seq_qc_inputs.config
+        echo "~{longbow_failed_reads_file}" >> mas-seq_qc_inputs.config
 
         echo "~{zmw_subread_stats_file_name}" >> mas-seq_qc_inputs.config
         echo "~{polymerase_read_lengths_file_name}" >> mas-seq_qc_inputs.config

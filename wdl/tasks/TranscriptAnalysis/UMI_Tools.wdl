@@ -29,7 +29,21 @@ task Run_Group {
 
     String per_cell_args = if do_per_cell then " --per-cell --cell-tag " + cell_barcode_tag + " " else ""
 
+    String memory_log_file = "memory_use.txt"
+
     command <<<
+
+        # Set up memory logging daemon:
+        MEM_LOG_INTERVAL_s=5
+        DO_MEMORY_LOG=true
+        while $DO_MEMORY_LOG ; do
+            date
+            date +%s
+            cat /proc/meminfo
+            sleep $MEM_LOG_INTERVAL_s
+        done >> ~{memory_log_file} &
+        mem_pid=$!
+
         set -euxo pipefail
 
         # Run umi-tools group:
@@ -45,11 +59,22 @@ task Run_Group {
           --group-out=~{prefix}.tsv \
           --output-bam \
           --log=~{prefix}.log > ~{prefix}.bam
+
+
+        # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
+        set +e
+        DO_MEMORY_LOG=false
+        sleep $(($MEM_LOG_INTERVAL_s  * 2))
+        kill -0 $mem_pid &> /dev/null
+        if [ $? -ne 0 ] ; then
+            kill -9 $mem_pid
+        fi
     >>>
 
     output {
         File output_bam = "~{prefix}.bam"
         File output_tsv = "~{prefix}.tsv"
+        File memory_log = "~{memory_log_file}"
     }
 
     #########################

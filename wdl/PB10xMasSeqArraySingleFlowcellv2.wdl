@@ -640,6 +640,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             annotated_bam_file               = complete_annotated_bam,
 
+            longbow_passed_reads_file        = MergeLongbowFilterPassedReads_3.merged_bam,
+            longbow_failed_reads_file        = MergeLongbowFilterFailedReads_3.merged_bam,
+
             zmw_subread_stats_file           = MergeShardedZmwSubreadStats.merged_tsv[0],
             polymerase_read_lengths_file     = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv[0],
 
