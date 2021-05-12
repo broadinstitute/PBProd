@@ -88,7 +88,7 @@ workflow PB10xMasSeqArrayPreProcessing {
 
             # 2 - split the reads by the model:
             String adis_prefix = basename(FilterByMinReadQuality.bam_out, ".bam")
-            call LONGBOW.Discriminate as AssignReadsToModels {
+            call LONGBOW.Demultiplex as AssignReadsToModels {
                 input:
                     bam = FilterByMinReadQuality.bam_out,
                     prefix = adis_prefix,

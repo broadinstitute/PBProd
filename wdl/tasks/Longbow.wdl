@@ -35,7 +35,7 @@ task Annotate
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -81,7 +81,7 @@ task Segment
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -138,7 +138,7 @@ task ScSplit
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -189,7 +189,7 @@ task Inspect
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -203,11 +203,11 @@ task Inspect
     }
 }
 
-task Discriminate
+task Demultiplex
 {
     input {
         File bam
-        String prefix = "longbow_discriminate"
+        String prefix = "longbow_demultiplex"
 
         RuntimeAttr? runtime_attr_override
     }
@@ -218,7 +218,7 @@ task Discriminate
         set -euxo pipefail
 
         source /longbow/venv/bin/activate
-        longbow discriminate -v INFO ~{bam} -o ~{prefix}
+        longbow demultiplex -v INFO ~{bam} -o ~{prefix}
 
         # Create a list of models - one for each bam file created:
         # Do this safely (assume there can be spaces in the names even though this is generally bad form).
@@ -243,7 +243,7 @@ task Discriminate
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -343,7 +343,7 @@ task Filter {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -405,7 +405,7 @@ task Extract {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.1.5"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.1"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {

@@ -20,7 +20,7 @@ task PB10xMasSeqSingleFlowcellReport {
         File array_elements_stats
         File ccs_report_file
 
-        File ccs_bam_file
+        File raw_ccs_bam_file
         File array_element_bam_file
         File? ccs_rejected_bam_file
 
@@ -52,7 +52,7 @@ task PB10xMasSeqSingleFlowcellReport {
         array_elements_stats : "Samtools raw stats file created from the aligned MASSeq array elements."
 
         ccs_report_file : "CCS report file from the CCS run for the data from the PacBio instrument."
-        ccs_bam_file : "Unaligned reads file in BAM format from the CCS process (pre-array splitting)."
+        raw_ccs_bam_file : "Unaligned reads file in BAM format from the CCS process (pre-array splitting)."
 
         array_element_bam_file : "Aligned reads file in BAM format containing aligned MASSeq array elements as individual reads."
         ccs_rejected_bam_file : "[optional] Bam file containing all subreads from zmws that were rejected by CCS."
@@ -84,11 +84,11 @@ task PB10xMasSeqSingleFlowcellReport {
             size(subreads_stats, "GB") +
             size(ccs_reads_stats, "GB") +
             size(ccs_report_file, "GB") +
-            size(ccs_bam_file, "GB") +
+            size(raw_ccs_bam_file, "GB") +
             size(array_element_bam_file, "GB") +
             size(ccs_rejected_bam_file, "GB") +
             size(annotated_bam_file, "GB") +
-            size(ccs_bam_file, "GB") +
+            size(raw_ccs_bam_file, "GB") +
             size(zmw_subread_stats_file, "GB") +
             size(polymerase_read_lengths_file, "GB") +
             size(ten_x_metrics_file, "GB") +
@@ -134,7 +134,7 @@ task PB10xMasSeqSingleFlowcellReport {
         echo "~{array_elements_stats}" >> mas-seq_qc_inputs.config
         echo "~{ccs_report_file}" >> mas-seq_qc_inputs.config
 
-        echo "~{ccs_bam_file}" >> mas-seq_qc_inputs.config
+        echo "~{raw_ccs_bam_file}" >> mas-seq_qc_inputs.config
         echo "~{array_element_bam_file}" >> mas-seq_qc_inputs.config
         echo "~{ccs_rejected_bam_file_name}" >> mas-seq_qc_inputs.config
 

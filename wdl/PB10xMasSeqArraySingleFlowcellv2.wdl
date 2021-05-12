@@ -51,6 +51,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
         Int min_ccs_passes = 2
 
+        # Default here is 0 because ccs uncorrected reads all seem to have RQ = -1.
+        # All pathologically long reads also have RQ = -1.
+        # This way we preserve the vast majority of the data, even if it has low quality.
+        # We can filter it out at later steps.
+        Float min_read_quality = 0.0
+        Int max_reclamation_length = 60000
+
         Boolean is_SIRV_data = false
         Boolean is_mas_seq_10_array = false
 
@@ -82,6 +89,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         workflow_dot_file : "DOT file containing the representation of this WDL to be included in the QC reports.  This can be generated with womtool."
 
         min_ccs_passes : "[optional] Minimum number of passes required for CCS to take place on a ZMW (Default: 2)."
+        min_read_quality : "[optional] Minimum read quality for reads to have to be included in our data (Default: 0.0)."
+        max_reclamation_length : "[optional] Maximum length (in bases) that a read can be to attempt to reclaim from CCS rejection (Default: 60000)."
 
         is_SIRV_data : "[optional] true if and only if the data in this sample are from the SIRV library prep.  false otherwise (Default: false)"
         is_mas_seq_10_array : "[optional] true if and only if the data in this sample were created using the 10 array element MAS-seq library prep.  false otherwise (Default: false)"
@@ -100,460 +109,514 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     Boolean use_subreads = FindBams.has_subreads
     Array[String] top_level_bam_files = if use_subreads then FindBams.subread_bams else FindBams.ccs_bams
 
-    scatter (reads_bam in top_level_bam_files) {
+    # Make sure we have **EXACTLY** one bam file to run on:
+    if (length(top_level_bam_files) != 1) {
+        call Utils.FailWithWarning { input: warning = "Error: Multiple BAM files found.  Cannot continue!" }
+     }
 
-        call PB.GetRunInfo { input: subread_bam = reads_bam }
+    # Alias our bam file so we can work with it easier:
+    File reads_bam = top_level_bam_files[0]
 
-        String SM  = select_first([sample_name, GetRunInfo.run_info["SM"]])
-        String PL  = "PACBIO"
-        String PU  = GetRunInfo.run_info["PU"]
-        String DT  = GetRunInfo.run_info["DT"]
-        String ID  = PU
-        String DS  = GetRunInfo.run_info["DS"]
-        String DIR = SM + "." + ID
+    call PB.GetRunInfo { input: subread_bam = reads_bam }
 
-        String RG_subreads  = "@RG\\tID:~{ID}.subreads\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
-        String RG_consensus = "@RG\\tID:~{ID}.consensus\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
-        String RG_array_elements = "@RG\\tID:~{ID}.array_elements\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
+    String SM  = select_first([sample_name, GetRunInfo.run_info["SM"]])
+    String PL  = "PACBIO"
+    String PU  = GetRunInfo.run_info["PU"]
+    String DT  = GetRunInfo.run_info["DT"]
+    String ID  = PU
+    String DS  = GetRunInfo.run_info["DS"]
+    String DIR = SM + "." + ID
 
-        # Get statistics on polymerase reads:
+    String RG_subreads  = "@RG\\tID:~{ID}.subreads\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
+    String RG_consensus = "@RG\\tID:~{ID}.consensus\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
+    String RG_array_elements = "@RG\\tID:~{ID}.array_elements\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
+
+    # Get statistics on polymerase reads:
+    if (use_subreads) {
+        call PB.CollectPolymeraseReadLengths {
+            input:
+                gcs_input_dir = gcs_input_dir,
+                subreads = reads_bam,
+                prefix = SM + "_polymerase_read_lengths"
+        }
+    }
+
+    # Check to see if we need to annotate our reads:
+    call LONGBOW.CheckForAnnotatedArrayReads {
+        input:
+            bam = reads_bam
+    }
+
+    File read_pbi = sub(reads_bam, ".bam$", ".bam.pbi")
+    call PB.ShardLongReads {
+        input:
+            unaligned_bam = reads_bam,
+            unaligned_pbi = read_pbi,
+            prefix = SM + "_shard",
+            num_shards = 50,
+    }
+
+    scatter (sharded_reads in ShardLongReads.unmapped_shards) {
+
+        ## No more preemption on this sharding - takes too long otherwise.
+        RuntimeAttr disable_preemption_runtime_attrs = object {
+            preemptible_tries: 0
+        }
+
+        String fbmrq_prefix = basename(sharded_reads, ".bam")
+
         if (use_subreads) {
-            call PB.CollectPolymeraseReadLengths {
-                input:
-                    gcs_input_dir = gcs_input_dir,
-                    subreads = reads_bam,
-                    prefix = SM + "_polymerase_read_lengths"
-            }
-        }
-
-        # Check to see if we need to annotate our reads:
-        call LONGBOW.CheckForAnnotatedArrayReads {
-            input:
-                bam = reads_bam
-        }
-
-        File read_pbi = sub(reads_bam, ".bam$", ".bam.pbi")
-        call PB.ShardLongReads {
-            input:
-                unaligned_bam = reads_bam,
-                unaligned_pbi = read_pbi,
-                prefix = SM + "_shard",
-                num_shards = 50,
-        }
-
-        scatter (sharded_reads in ShardLongReads.unmapped_shards) {
-
-            ## No more preemption on this sharding - takes too long otherwise.
-            RuntimeAttr disable_preemption_runtime_attrs = object {
+            # Call CCS on the subreads from the sequencer:
+            # No preepting because these take long enough that it doesn't seem to save $
+            # 16 gigs of memory because I had a crash at 8
+            RuntimeAttr ccs_runtime_attrs = object {
+                mem_gb: 16,
                 preemptible_tries: 0
             }
-
-            if (use_subreads) {
-                # Call CCS on the subreads from the sequencer:
-                # No preepting because these take long enough that it doesn't seem to save $
-                # 16 gigs of memory because I had a crash at 8
-                RuntimeAttr ccs_runtime_attrs = object {
-                    mem_gb: 16,
-                    preemptible_tries: 0
-                }
-                call PB.CCS {
-                    input:
-                        subreads = sharded_reads,
-                        min_passes = min_ccs_passes,
-                        disk_space_scale_factor = 4,
-                        runtime_attr_override = ccs_runtime_attrs
-                }
-                call PB.PBIndex as PBIndexCCSReads { input: bam = CCS.consensus }
-
-                # Get our uncorrected / CCS Rejected reads:
-                call PB.ExtractUncorrectedReads {
-                    input:
-                        subreads = sharded_reads,
-                        consensus = CCS.consensus,
-                        prefix = SM + "_ccs_rejected",
-                        runtime_attr_override = disable_preemption_runtime_attrs
-                }
-                call PB.PBIndex as PBIndexSubreadShard { input: bam = sharded_reads }
-
-                call PB.ShardLongReads as SubshardRawSubreads {
-                    input:
-                        unaligned_bam = sharded_reads,
-                        unaligned_pbi = PBIndexSubreadShard.pbindex,
-                        num_shards = 10,
-                        prefix = "subshard"
-                }
-                scatter (subsharded_subreads in SubshardRawSubreads.unmapped_shards) {
-
-                    # Get ZMW Subread stats here to shard them out wider and make it faster:
-                    call PB.CollectZmwSubreadStats as CollectZmwSubreadStats_subsharded {
-                        input:
-                            subreads = subsharded_subreads,
-                            prefix = SM + "_zmw_subread_stats"
-                    }
-                }
-
-                # Merge our micro-shards of subread stats:
-                call Utils.MergeTsvFiles as MergeMicroShardedZmwSubreadStats {
-                    input:
-                        tsv_files = CollectZmwSubreadStats_subsharded.zmw_subread_stats
-                }
-            }
-            if (!use_subreads) {
-                # Handle setting up the things that we need for further processing of CCS-only reads:
-                call PB.FindCCSReport {
-                    input:
-                        gcs_input_dir = gcs_input_dir
-                }
-                call PB.PBIndex as PbIndexShardedReads {
-                    input:
-                        bam = sharded_reads
-                }
-            }
-
-            # Resolve our CCS-corrected bam depending on if we have CCS reads or not:
-            File ccs_bam = if use_subreads then select_first([CCS.consensus]) else sharded_reads
-
-            # Shard these reads even wider so we can make sure we don't run out of memory:
-            File ccs_pbi = if use_subreads then select_first([PBIndexCCSReads.pbindex]) else select_first([PbIndexShardedReads.pbindex])
-            call PB.ShardLongReads as ShardCorrectedReads{
+            call PB.CCS {
                 input:
-                    unaligned_bam = ccs_bam,
-                    unaligned_pbi = ccs_pbi,
-                    prefix = SM + "_subshard",
-                    num_shards = 20,
+                    subreads = sharded_reads,
+                    min_passes = min_ccs_passes,
+                    disk_space_scale_factor = 4,
+                    runtime_attr_override = ccs_runtime_attrs
             }
+            call PB.PBIndex as PBIndexCCSReads { input: bam = CCS.consensus }
 
-            scatter (corrected_shard in ShardCorrectedReads.unmapped_shards) {
-
-                if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
-                    call LONGBOW.Annotate as AnnotateReads {
-                        input:
-                            reads = corrected_shard,
-                            is_mas_seq_10_array = is_mas_seq_10_array
-                    }
-                }
-
-                File annotated_file = if CheckForAnnotatedArrayReads.bam_has_annotations then corrected_shard else select_first([AnnotateReads.annotated_bam])
-                call LONGBOW.Segment as SegmentAnnotatedReads {
-                    input:
-                        annotated_reads = annotated_file,
-                        is_mas_seq_10_array = is_mas_seq_10_array
-                }
-
-                # Get the reads that conform to the model, and those that do not:
-                call LONGBOW.Filter as FilterAnnotatedReadsByLongbowModel {
-                    input:
-                        bam = annotated_file,
-                        prefix = SM + "_subshard",
-                        is_mas_seq_10_array = is_mas_seq_10_array
-                }
-            }
-
-            # Merge all filtered bams together:
-            call Utils.MergeBams as MergeLongbowFilterPassedReads_subshards {
+            # Get our uncorrected / CCS Rejected reads:
+            call PB.ExtractUncorrectedReads {
                 input:
-                    bams = FilterAnnotatedReadsByLongbowModel.passed_reads,
-                    prefix = SM + "_LongbowFilter_Passed_1"
-            }
-            call Utils.MergeBams as MergeLongbowFilterFailedReads_subshards {
-                input:
-                    bams = FilterAnnotatedReadsByLongbowModel.failed_reads,
-                    prefix = SM + "_LongbowFilter_Failed_1"
+                    subreads = sharded_reads,
+                    consensus = CCS.consensus,
+                    prefix = SM + "_ccs_rejected",
+                    runtime_attr_override = disable_preemption_runtime_attrs
             }
 
-            # Merge all outputs of Longbow Annotate / Segment:
+            # Extract reclaimable reads:
+            call Utils.Bamtools as ExtractCcsReclaimableReads {
+                input:
+                    bamfile = ExtractUncorrectedReads.uncorrected,
+                    prefix = fbmrq_prefix + "_reads_for_ccs_reclamation",
+                    cmd = "filter",
+                    args = '-length "<=' + max_reclamation_length + '"',
+                    runtime_attr_override = disable_preemption_runtime_attrs
+            }
+            ###################
+
             if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
-                call Utils.MergeBams as MergeAnnotatedReads_1 {
+                # 3: Longbow annotate ccs reads
+                call LONGBOW.Annotate as AnnotateCCSReads {
                     input:
-                        bams = select_all(AnnotateReads.annotated_bam),
-                        prefix = SM + "_AnnotatedReads_intermediate_1"
+                        reads = CCS.consensus,
+                        is_mas_seq_10_array = is_mas_seq_10_array
                 }
-            }
-            call Utils.MergeBams as MergeArrayElements_1 {
-                input:
-                    bams = SegmentAnnotatedReads.segmented_bam,
-                    prefix = SM + "_ArrayElements_intermediate_1"
-            }
-
-            # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
-            if (is_SIRV_data) {
-                call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
+                # 4: Longbow annotate reclaimable reads
+                call LONGBOW.Annotate as AnnotateReclaimableReads {
                     input:
-                        bam_file = MergeArrayElements_1.merged_bam,
-                        prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
-                }
-            }
-            if ( ! is_SIRV_data ) {
-                call TENX.AnnotateBarcodesAndUMIs as TenxAnnotateArrayElements {
-                    input:
-                        bam_file = MergeArrayElements_1.merged_bam,
-                        bam_index = MergeArrayElements_1.merged_bai,
-                        head_adapter_fasta = head_adapter_fasta,
-                        tail_adapter_fasta = tail_adapter_fasta,
-                        whitelist_10x = ten_x_cell_barcode_whitelist,
-                        read_end_length = 200,
-                        poly_t_length = 31,
-                        barcode_length = 16,
-                        umi_length = 10,
-                        mem_gb = 32
+                        reads = ExtractCcsReclaimableReads.bam_out,
+                        is_mas_seq_10_array = is_mas_seq_10_array
                 }
             }
 
-            # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
-            # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
-            # output to `File?` instead of `File`
-            File annotatedReads = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
+            File annotated_ccs_file = if CheckForAnnotatedArrayReads.bam_has_annotations then CCS.consensus else select_first([AnnotateCCSReads.annotated_bam])
+            File annotated_reclaimable_file = if CheckForAnnotatedArrayReads.bam_has_annotations then ExtractCcsReclaimableReads.bam_out else select_first([AnnotateReclaimableReads.annotated_bam])
 
-            # Grab only the coding regions of the annotated reads for our alignments:
-            Int extract_start_offset = if is_SIRV_data then 8 else 26
-            call LONGBOW.Extract as ExtractCodingRegionsFromArrayElements {
+            # 5: Longbow filter ccs annotated reads
+            call LONGBOW.Filter as FilterCCSReads {
                 input:
-                    bam = annotatedReads,
-                    start_offset = extract_start_offset,
-                    prefix = SM + "_ArrayElements_Coding_Regions_Only"
+                    bam = annotated_ccs_file,
+                    prefix = SM + "_subshard",
+                    is_mas_seq_10_array = is_mas_seq_10_array
             }
 
-            # Align our array elements:
-            call AR.Minimap2 as AlignArrayElements {
+            # 6: Longbow filter ccs reclaimable reads
+            call LONGBOW.Filter as FilterReclaimableReads {
                 input:
-                    reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
-                    ref_fasta  = transcriptome_ref_fasta,
-                    RG         = RG_array_elements,
-                    map_preset = "splice:hq"
+                    bam = annotated_reclaimable_file,
+                    prefix = SM + "_subshard",
+                    is_mas_seq_10_array = is_mas_seq_10_array
             }
 
-            call AR.Minimap2 as AlignArrayElementsToGenome {
-                input:
-                    reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
-                    ref_fasta  = ref_fasta,
-                    RG         = RG_consensus,
-                    map_preset = "splice:hq"
-            }
-
-            # We need to restore the annotations we created with the 10x tool to the aligned reads.
-            call TENX.RestoreAnnotationstoAlignedBam {
-                input:
-                    annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
-                    aligned_bam_file = AlignArrayElements.aligned_bam
-            }
-
-            # We need to restore the annotations we created with the 10x tool to the aligned reads.
-            call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToGenomeAlignedBam {
-                input:
-                    annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
-                    aligned_bam_file = AlignArrayElementsToGenome.aligned_bam
-            }
-
-            # To properly count our transcripts we must throw away the non-primary and unaligned reads:
-            call Utils.FilterReadsBySamFlags as RemoveUnmappedAndNonPrimaryReads {
-                input:
-                    bam = RestoreAnnotationstoAlignedBam.output_bam,
-                    sam_flags = "2308",
-                    prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly"
-            }
-
-            # Filter reads with no UMI tag:
-            call Utils.FilterReadsWithTagValues as FilterReadsWithNoUMI {
-                input:
-                    bam = RemoveUnmappedAndNonPrimaryReads.output_bam,
-                    tag = "ZU",
-                    value_to_remove = ".",
-                    prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs"
-            }
-
-            # Copy the contig to a tag.
-            # By this point in the pipeline, array elements are aligned to a transcriptome, so this tag will
-            # actually indicate the transcript to which each array element aligns.
-            call TENX.CopyContigNameToReadTag {
-                input:
-                    aligned_bam_file = FilterReadsWithNoUMI.output_bam,
-                    prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs_intermediate_1"
-            }
-        }
-
-        # Merge all sharded merged outputs from annotating / splitting:
-        if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
-            call Utils.MergeBams as MergeAnnotatedReads_2 {
-                input:
-                    bams = select_all(MergeAnnotatedReads_1.merged_bam),
-                    prefix = SM + "_AnnotatedReads_intermediate_2"
-            }
-        }
-        call Utils.MergeBams as MergeArrayElements_2 {
+            # 7: Merge reclaimed and ccs longbow filtered reads
+            call Utils.MergeBams as MergeLongbowPassedReads {
             input:
-                bams = MergeArrayElements_1.merged_bam,
-                prefix = SM + "_ArrayElements_intermediate_2"
-        }
+                bams = [FilterCCSReads.passed_reads, FilterReclaimableReads.passed_reads],
+                prefix = SM + "_LongbowFilter_Failed_1"
+            }
+            call Utils.MergeBams as MergeLongbowFailedReads {
+            input:
+                bams = [FilterCCSReads.failed_reads, FilterReclaimableReads.failed_reads],
+                prefix = SM + "_LongbowFilter_Failed_1"
+            }
 
-        if (use_subreads) {
-            # Merge the sharded zmw subread stats:
-            call Utils.MergeTsvFiles as MergeShardedZmwSubreadStats {
+            # 8: PBIndex reads
+            call PB.PBIndex as PbIndexLongbowPassedReads {
                 input:
-                    tsv_files = select_all(MergeMicroShardedZmwSubreadStats.merged_tsv),
-                    prefix = SM + "_zmw_subread_stats"
+                    bam = MergeLongbowPassedReads.merged_bam
+            }
+
+
+            ###################
+            # Get ZMW stats:
+            call PB.PBIndex as PBIndexSubreadShard { input: bam = sharded_reads }
+            call PB.ShardLongReads as SubshardRawSubreads {
+                input:
+                    unaligned_bam = sharded_reads,
+                    unaligned_pbi = PBIndexSubreadShard.pbindex,
+                    num_shards = 10,
+                    prefix = "subshard"
+            }
+            scatter (subsharded_subreads in SubshardRawSubreads.unmapped_shards) {
+
+                # Get ZMW Subread stats here to shard them out wider and make it faster:
+                call PB.CollectZmwSubreadStats as CollectZmwSubreadStats_subsharded {
+                    input:
+                        subreads = subsharded_subreads,
+                        prefix = SM + "_zmw_subread_stats"
+                }
+            }
+
+            # Merge our micro-shards of subread stats:
+            call Utils.MergeTsvFiles as MergeMicroShardedZmwSubreadStats {
+                input:
+                    tsv_files = CollectZmwSubreadStats_subsharded.zmw_subread_stats
+            }
+        }
+        if (!use_subreads) {
+            # Handle setting up the things that we need for further processing of CCS-only reads:
+            call PB.FindCCSReport {
+                input:
+                    gcs_input_dir = gcs_input_dir
+            }
+
+            # 1 - filter the reads by the minimum read quality:
+            call Utils.Bamtools as FilterS2EByMinReadQuality {
+                input:
+                    bamfile = sharded_reads,
+                    prefix = fbmrq_prefix + "_good_reads",
+                    cmd = "filter",
+                    args = '-tag "rq":">=' + min_read_quality + '"',
+                    runtime_attr_override = disable_preemption_runtime_attrs
+            }
+
+            # 1.5 - Get the "rejected" reads:
+            call Utils.Bamtools as GetS2ERCcsRejectedReads {
+                input:
+                    bamfile = sharded_reads,
+                    prefix = fbmrq_prefix + "_rejected_reads",
+                    cmd = "filter",
+                    args = '-tag "rq":"<' + min_read_quality + '"',
+                    runtime_attr_override = disable_preemption_runtime_attrs
+            }
+
+            # 2 - Get reads we can reclaim:
+            call Utils.Bamtools as ExtractS2ECcsReclaimableReads {
+                input:
+                    bamfile = sharded_reads,
+                    prefix = fbmrq_prefix + "_reads_for_ccs_reclamation",
+                    cmd = "filter",
+                    args = '-tag "rq":"<' + min_read_quality + '" -length "<=' + max_reclamation_length + '"',
+                    runtime_attr_override = disable_preemption_runtime_attrs
+            }
+
+            if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
+                # 3: Longbow annotate ccs reads
+                call LONGBOW.Annotate as AnnotateS2ECCSReads {
+                    input:
+                        reads = FilterS2EByMinReadQuality.bam_out,
+                        is_mas_seq_10_array = is_mas_seq_10_array
+                }
+                # 4: Longbow annotate reclaimable reads
+                call LONGBOW.Annotate as AnnotateS2EReclaimableReads {
+                    input:
+                        reads = ExtractS2ECcsReclaimableReads.bam_out,
+                        is_mas_seq_10_array = is_mas_seq_10_array
+                }
+            }
+
+            File annotated_S2E_ccs_file = if CheckForAnnotatedArrayReads.bam_has_annotations then FilterS2EByMinReadQuality.bam_out else select_first([AnnotateS2ECCSReads.annotated_bam])
+            File annotated_S2E_reclaimable_file = if CheckForAnnotatedArrayReads.bam_has_annotations then ExtractS2ECcsReclaimableReads.bam_out else select_first([AnnotateS2EReclaimableReads.annotated_bam])
+
+            # 5: Longbow filter ccs annotated reads
+            call LONGBOW.Filter as FilterS2ECCSReads {
+                input:
+                    bam = annotated_S2E_ccs_file,
+                    prefix = SM + "_subshard",
+                    is_mas_seq_10_array = is_mas_seq_10_array
+            }
+
+            # 6: Longbow filter ccs reclaimable reads
+            call LONGBOW.Filter as FilterS2EReclaimableReads {
+                input:
+                    bam = annotated_S2E_reclaimable_file,
+                    prefix = SM + "_subshard",
+                    is_mas_seq_10_array = is_mas_seq_10_array
+            }
+
+            # 7: Merge reclaimed and ccs longbow filtered reads
+            call Utils.MergeBams as MergeLongbowS2EPassedReads {
+            input:
+                bams = [FilterS2ECCSReads.passed_reads, FilterS2EReclaimableReads.passed_reads],
+                prefix = SM + "_LongbowFilter_Failed_1"
+            }
+            call Utils.MergeBams as MergeLongbowS2EFailedReads {
+            input:
+                bams = [FilterS2ECCSReads.failed_reads, FilterS2EReclaimableReads.failed_reads],
+                prefix = SM + "_LongbowFilter_Failed_1"
+            }
+
+            # 8: PBIndex reads
+            call PB.PBIndex as PbIndexS2ELongbowPassedReads {
+                input:
+                    bam = MergeLongbowS2EPassedReads.merged_bam
             }
         }
 
-        # Merge the reads we shall use for quantification:
-        call Utils.MergeBams as MergeShardedArrayElementsForQuant {
+        # Shard these reads even wider so we can make sure we don't run out of memory:
+        File longbow_passed_reads = if use_subreads then select_first([MergeLongbowPassedReads.merged_bam]) else select_first([MergeLongbowS2EPassedReads.merged_bam])
+        File longbow_passed_reads_pbi = if use_subreads then select_first([PbIndexLongbowPassedReads.pbindex]) else select_first([PbIndexS2ELongbowPassedReads.pbindex])
+        call PB.ShardLongReads as ShardCorrectedReads {
             input:
-                bams = CopyContigNameToReadTag.output_bam,
-                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs_intermediate_2"
+                unaligned_bam = longbow_passed_reads,
+                unaligned_pbi = longbow_passed_reads_pbi,
+                prefix = SM + "_longbow_all_passed_subshard",
+                num_shards = 20,
         }
 
-        # Merge the longbow filtered reads:
-        call Utils.MergeBams as MergeLongbowFilterPassedReads_2 {
-            input:
-                bams = MergeLongbowFilterPassedReads_subshards.merged_bam,
-                prefix = SM + "_LongbowFilter_Passed_2"
-        }
-        call Utils.MergeBams as MergeLongbowFilterFailedReads_2 {
-            input:
-                bams = MergeLongbowFilterFailedReads_subshards.merged_bam,
-                prefix = SM + "_LongbowFilter_Failed_2"
+        # Segment our arrays into individual array elements:
+        scatter (corrected_shard in ShardCorrectedReads.unmapped_shards) {
+            call LONGBOW.Segment as SegmentAnnotatedReads {
+                input:
+                    annotated_reads = corrected_shard,
+                    is_mas_seq_10_array = is_mas_seq_10_array
+            }
         }
 
-        # Merge the 10x stats:
+        # Merge all outputs of Longbow Annotate / Segment:
+        call Utils.MergeBams as MergeArrayElements_1 {
+            input:
+                bams = SegmentAnnotatedReads.segmented_bam,
+                prefix = SM + "_ArrayElements_intermediate_1"
+        }
+
+        # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
+        if (is_SIRV_data) {
+            call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
+                input:
+                    bam_file = MergeArrayElements_1.merged_bam,
+                    prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
+            }
+        }
         if ( ! is_SIRV_data ) {
-            call Utils.MergeCountTsvFiles as Merge10XStats_1 {
+            call TENX.AnnotateBarcodesAndUMIs as TenxAnnotateArrayElements {
                 input:
-                    count_tsv_files = select_all(TenxAnnotateArrayElements.stats)
+                    bam_file = MergeArrayElements_1.merged_bam,
+                    bam_index = MergeArrayElements_1.merged_bai,
+                    head_adapter_fasta = head_adapter_fasta,
+                    tail_adapter_fasta = tail_adapter_fasta,
+                    whitelist_10x = ten_x_cell_barcode_whitelist,
+                    read_end_length = 200,
+                    poly_t_length = 31,
+                    barcode_length = 16,
+                    umi_length = 10,
+                    mem_gb = 32
             }
         }
 
-        # Merge all Aligned array elements together for this Subread BAM:
-        call Utils.MergeBams as MergeAnnotatedArrayElementChunk { input: bams = annotatedReads }
+        # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
+        # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
+        # output to `File?` instead of `File`
+        File annotatedReads = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
 
-        # Merge all Aligned array elements together for this Subread BAM:
-        call Utils.MergeBams as MergeAlignedArrayElementChunk { input: bams = AlignArrayElements.aligned_bam }
-
-        # Merge all Aligned and re-annotated array elements together for this Subread BAM:
-        call Utils.MergeBams as MergeAnnoatatedAlignedArrayElementChunk { input: bams = RestoreAnnotationstoAlignedBam.output_bam }
-
-        # Merge all CCS bams together for this Subread BAM:
-        call Utils.MergeBams as MergeChunks { input: bams = ccs_bam }
-
-        # Merge all CCS Rejected bams together:
-        if (use_subreads) {
-            call Utils.MergeBams as MergeCCSRejectedChunks { input: bams = select_all(ExtractUncorrectedReads.uncorrected) }
-        }
-
-        # Merge all CCS bams together for this Subread BAM:
-        call Utils.MergeBams as MergeGenomeAlignedArrayElementChunk { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam }
-
-        # Merge all CCS reports together for this Subread BAM:
-        Array[File] ccs_reports_to_merge = if use_subreads then select_all(CCS.report) else select_all(FindCCSReport.ccs_report)
-        call PB.MergeCCSReports as MergeCCSReports { input: reports = ccs_reports_to_merge }
-
-        # Collect metrics on the subreads bam:
-        RuntimeAttr subreads_sam_stats_runtime_attrs = object {
-            cpu_cores:          2,
-            mem_gb:             8,
-            disk_gb:            ceil(3 * size(reads_bam, "GiB")),
-            boot_disk_gb:       10,
-            preemptible_tries:  0,
-            max_retries:        1,
-            docker:             "us.gcr.io/broad-dsp-lrma/lr-metrics:0.1.8"
-        }
-        call AM.SamtoolsStats as CalcSamStatsOnInputBam {
+        # Grab only the coding regions of the annotated reads for our alignments:
+        Int extract_start_offset = if is_SIRV_data then 8 else 26
+        call LONGBOW.Extract as ExtractCodingRegionsFromArrayElements {
             input:
-                bam = reads_bam,
-                runtime_attr_override = subreads_sam_stats_runtime_attrs
+                bam = annotatedReads,
+                start_offset = extract_start_offset,
+                prefix = SM + "_ArrayElements_Coding_Regions_Only"
         }
-        call FF.FinalizeToDir as FinalizeSamStatsOnInputBam {
+
+        # Align our array elements:
+        call AR.Minimap2 as AlignArrayElements {
             input:
-                # an unfortunate hard-coded path here:
-                outdir = outdir + "/" + DIR + "/" + WdlExecutionStartTimestamp.timestamp_string + "/metrics/input_bam_stats",
-                files = [
-                    CalcSamStatsOnInputBam.raw_stats,
-                    CalcSamStatsOnInputBam.summary_stats,
-                    CalcSamStatsOnInputBam.first_frag_qual,
-                    CalcSamStatsOnInputBam.last_frag_qual,
-                    CalcSamStatsOnInputBam.first_frag_gc_content,
-                    CalcSamStatsOnInputBam.last_frag_gc_content,
-                    CalcSamStatsOnInputBam.acgt_content_per_cycle,
-                    CalcSamStatsOnInputBam.insert_size,
-                    CalcSamStatsOnInputBam.read_length_dist,
-                    CalcSamStatsOnInputBam.indel_distribution,
-                    CalcSamStatsOnInputBam.indels_per_cycle,
-                    CalcSamStatsOnInputBam.coverage_distribution,
-                    CalcSamStatsOnInputBam.gc_depth
-                ]
+                reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
+                ref_fasta  = transcriptome_ref_fasta,
+                RG         = RG_array_elements,
+                map_preset = "splice:hq"
         }
-    }
 
-    # Merge all sharded merged sharded outputs for Annotation / Segmentation:
-    # TODO: Fix SM[0] to be the right sample name if multiple samples are found.
-    if ( ! CheckForAnnotatedArrayReads.bam_has_annotations[0] ) {
-        call Utils.MergeBams as MergeAnnotatedReads_3 {
+        call AR.Minimap2 as AlignArrayElementsToGenome {
             input:
-                bams = select_all(MergeAnnotatedReads_2.merged_bam),
-                prefix = SM[0] + ".AnnotatedReads"
+                reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
+                ref_fasta  = ref_fasta,
+                RG         = RG_consensus,
+                map_preset = "splice:hq"
         }
-        call PB.PBIndex as PbIndexAnnotatedReads {
+
+        # We need to restore the annotations we created with the 10x tool to the aligned reads.
+        call TENX.RestoreAnnotationstoAlignedBam {
             input:
-                bam = MergeAnnotatedReads_3.merged_bam
+                annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
+                aligned_bam_file = AlignArrayElements.aligned_bam
         }
-    }
 
-    call Utils.MergeBams as MergeArrayElements_3 {
-        input:
-            bams = MergeArrayElements_2.merged_bam,
-            prefix = SM[0] + ".ArrayElements"
-    }
-    call PB.PBIndex as PbIndexArrayElements {
-        input:
-            bam = MergeArrayElements_3.merged_bam
-    }
-
-    call Utils.MergeBams as MergeArrayElementsForQuant {
-        input:
-            bams = MergeShardedArrayElementsForQuant.merged_bam,
-            prefix = SM[0] + ".Annotated.ArrayElements.ForQuant"
-    }
-
-    # Merge the longbow filtered reads:
-    call Utils.MergeBams as MergeLongbowFilterPassedReads_3 {
-        input:
-            bams = MergeLongbowFilterPassedReads_2.merged_bam,
-            prefix = SM[0] + "_LongbowFilter_Passed"
-    }
-    call Utils.MergeBams as MergeLongbowFilterFailedReads_3 {
-        input:
-            bams = MergeLongbowFilterFailedReads_2.merged_bam,
-            prefix = SM[0] + "_LongbowFilter_Failed"
-    }
-
-    # Merge the 10x merged stats:
-    if ( ! is_SIRV_data ) {
-        call Utils.MergeCountTsvFiles as Merge10XStats_2 {
+        # We need to restore the annotations we created with the 10x tool to the aligned reads.
+        call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToGenomeAlignedBam {
             input:
-                count_tsv_files = select_all(Merge10XStats_1.merged_tsv),
-                prefix = "10x_stats_merged"
+                annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
+                aligned_bam_file = AlignArrayElementsToGenome.aligned_bam
+        }
+
+        # To properly count our transcripts we must throw away the non-primary and unaligned reads:
+        call Utils.FilterReadsBySamFlags as RemoveUnmappedAndNonPrimaryReads {
+            input:
+                bam = RestoreAnnotationstoAlignedBam.output_bam,
+                sam_flags = "2308",
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly"
+        }
+
+        # Filter reads with no UMI tag:
+        call Utils.FilterReadsWithTagValues as FilterReadsWithNoUMI {
+            input:
+                bam = RemoveUnmappedAndNonPrimaryReads.output_bam,
+                tag = "ZU",
+                value_to_remove = ".",
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs"
+        }
+
+        # Copy the contig to a tag.
+        # By this point in the pipeline, array elements are aligned to a transcriptome, so this tag will
+        # actually indicate the transcript to which each array element aligns.
+        call TENX.CopyContigNameToReadTag {
+            input:
+                aligned_bam_file = FilterReadsWithNoUMI.output_bam,
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs_intermediate_1"
         }
     }
-    # Merge all array element bams together for this flowcell:
-    call Utils.MergeBams as MergeAnnotatedArrayElements { input: bams = MergeAnnotatedArrayElementChunk.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.Annotated.ArrayElements" }
 
-    # Merge all array element bams together for this flowcell:
-    call Utils.MergeBams as MergeAlignedArrayElements { input: bams = MergeAlignedArrayElementChunk.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.Aligned.ArrayElements" }
+    #################################################
+    #   __  __
+    #  |  \/  | ___ _ __ __ _  ___
+    #  | |\/| |/ _ \ '__/ _` |/ _ \
+    #  | |  | |  __/ | | (_| |  __/
+    #  |_|  |_|\___|_|  \__, |\___|
+    #                   |___/
+    #
+    # Merge all the sharded files we created above into files for this
+    # input bam file.
+    #################################################
 
-    # Merge all array element bams together for this flowcell:
-    call Utils.MergeBams as MergeAnnotatedAlignedArrayElements { input: bams = MergeAnnoatatedAlignedArrayElementChunk.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.Aligned.Annotated.ArrayElements" }
-
-    # Merge all CCS Rejected chunks:
+    # Merge the files from the first half based on whether we had Sequel II or Sequel IIE data:
     if (use_subreads) {
-        call Utils.MergeBams as MergeAllCCSRejectedBams { input: bams = select_all(MergeCCSRejectedChunks.merged_bam), prefix = "~{SM[0]}.~{ID[0]}.ccs_rejected" }
+        # Sequel II Data.
+        # CCS Passed:
+        call Utils.MergeBams as MergeCCSReads { input: bams = select_all(CCS.consensus) }
+        call Utils.MergeBams as MergeCCSRejectedReads { input: bams = select_all(ExtractUncorrectedReads.uncorrected) }
+        call Utils.MergeBams as MergeAnnotatedCCSReads { input: bams = select_all(annotated_ccs_file) }
+        call Utils.MergeBams as MergeLongbowPassedCCSReads { input: bams = select_all(FilterCCSReads.passed_reads) }
+        call Utils.MergeBams as MergeLongbowFailedCCSReads { input: bams = select_all(FilterCCSReads.failed_reads) }
+
+        # CCS Failed / Reclaimable:
+        call Utils.MergeBams as MergeCCSReclaimableReads { input: bams = select_all(ExtractCcsReclaimableReads.bam_out) }
+        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads { input: bams = select_all(annotated_reclaimable_file) }
+        call Utils.MergeBams as MergeLongbowPassedReclaimable { input: bams = select_all(FilterReclaimableReads.passed_reads) }
+        call Utils.MergeBams as MergeLongbowFailedReclaimable { input: bams = select_all(FilterReclaimableReads.failed_reads) }
+
+        # All Longbow Passed / Failed reads:
+        call Utils.MergeBams as MergeAllLongbowPassedReads { input: bams = select_all(MergeLongbowPassedReads.merged_bam) }
+        call Utils.MergeBams as MergeAllLongbowFailedReads { input: bams = select_all(MergeLongbowFailedReads.merged_bam) }
+
+        # Merge the sharded zmw subread stats:
+        call Utils.MergeTsvFiles as MergeShardedZmwSubreadStats {
+            input:
+                tsv_files = select_all(MergeMicroShardedZmwSubreadStats.merged_tsv),
+                prefix = SM + "_zmw_subread_stats"
+        }
+    }
+    if (!use_subreads) {
+        # Sequel IIe Data.
+        # CCS Passed:
+        call Utils.MergeBams as MergeCCSRqFilteredReads { input: bams = select_all(FilterS2EByMinReadQuality.bam_out) }
+        call Utils.MergeBams as MergeCCSRqRejectedReads { input: bams = select_all(GetS2ERCcsRejectedReads.bam_out) }
+        call Utils.MergeBams as MergeAnnotatedCCSReads_S2e { input: bams = select_all(annotated_S2E_ccs_file) }
+        call Utils.MergeBams as MergeLongbowPassedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.passed_reads) }
+        call Utils.MergeBams as MergeLongbowFailedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.failed_reads) }
+
+        # CCS Failed / Reclaimable:
+        call Utils.MergeBams as MergeCCSReclaimableReads_S2e { input: bams = select_all(ExtractS2ECcsReclaimableReads.bam_out) }
+        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads_S2e { input: bams = select_all(annotated_S2E_reclaimable_file) }
+        call Utils.MergeBams as MergeLongbowPassedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.passed_reads) }
+        call Utils.MergeBams as MergeLongbowFailedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.failed_reads) }
+
+        # All Longbow Passed / Failed reads:
+        call Utils.MergeBams as MergeAllLongbowPassedReads_S2e { input: bams = select_all(MergeLongbowS2EPassedReads.merged_bam) }
+        call Utils.MergeBams as MergeAllLongbowFailedReads_S2e { input: bams = select_all(MergeLongbowS2EFailedReads.merged_bam) }
     }
 
-    # Merge all aligned CCS bams together for this flowcell:
-    call Utils.MergeBams as MergeAllAlignedCCSBams { input: bams = MergeGenomeAlignedArrayElementChunk.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.genome_aligned.Annotated.ArrayElements" }
+    # Alias out the data we need to pass into stuff later:
+    File ccs_corrected_reads = if (use_subreads) then MergeCCSReads.merged_bam else MergeCCSRqFilteredReads.merged_bam
+    File ccs_corrected_reads_index = if (use_subreads) then MergeCCSReads.merged_bai else MergeCCSRqFilteredReads.merged_bai
+    File ccs_rejected_reads = if (use_subreads) then MergeCCSRejectedReads.merged_bam else MergeCCSRqRejectedReads.merged_bam
+    File ccs_rejected_reads_index = if (use_subreads) then MergeCCSRejectedReads.merged_bai else MergeCCSRqRejectedReads.merged_bai
+    File annotated_ccs_reads = if (use_subreads) then MergeAnnotatedCCSReads.merged_bam else MergeAnnotatedCCSReads_S2e.merged_bam
+    File annotated_ccs_reads_index = if (use_subreads) then MergeAnnotatedCCSReads.merged_bai else MergeAnnotatedCCSReads_S2e.merged_bai
+    File longbow_passed_ccs_reads = if (use_subreads) then MergeLongbowPassedCCSReads.merged_bam else MergeLongbowPassedCCSReads_S2e.merged_bam
+    File longbow_passed_ccs_reads_index = if (use_subreads) then MergeLongbowPassedCCSReads.merged_bai else MergeLongbowPassedCCSReads_S2e.merged_bai
+    File longbow_failed_ccs_reads = if (use_subreads) then MergeLongbowFailedCCSReads.merged_bam else MergeLongbowFailedCCSReads_S2e.merged_bam
+    File longbow_failed_ccs_reads_index = if (use_subreads) then MergeLongbowFailedCCSReads.merged_bai else MergeLongbowFailedCCSReads_S2e.merged_bai
+    File ccs_reclaimable_reads = if (use_subreads) then MergeCCSReclaimableReads.merged_bam else MergeCCSReclaimableReads_S2e.merged_bam
+    File ccs_reclaimable_reads_index = if (use_subreads) then MergeCCSReclaimableReads.merged_bai else MergeCCSReclaimableReads_S2e.merged_bai
+    File annotated_ccs_reclaimable_reads = if (use_subreads) then select_first([MergeCCSReclaimableAnnotatedReads.merged_bam]) else select_first([MergeCCSReclaimableAnnotatedReads_S2e.merged_bam])
+    File annotated_ccs_reclaimable_reads_index = if (use_subreads) then MergeCCSReclaimableAnnotatedReads.merged_bai else MergeCCSReclaimableAnnotatedReads_S2e.merged_bai
+    File ccs_reclaimed_reads = if (use_subreads) then MergeLongbowPassedReclaimable.merged_bam else MergeLongbowPassedReclaimable_S2e.merged_bam
+    File ccs_reclaimed_reads_index = if (use_subreads) then MergeLongbowPassedReclaimable.merged_bai else MergeLongbowPassedReclaimable_S2e.merged_bai
+    File longbow_failed_ccs_unreclaimable_reads = if (use_subreads) then MergeLongbowFailedReclaimable.merged_bam else MergeLongbowFailedReclaimable_S2e.merged_bam
+    File longbow_failed_ccs_unreclaimable_reads_index = if (use_subreads) then MergeLongbowFailedReclaimable.merged_bai else MergeLongbowFailedReclaimable_S2e.merged_bai
+    File longbow_passed_reads = if (use_subreads) then MergeAllLongbowPassedReads.merged_bam else MergeAllLongbowPassedReads_S2e.merged_bam
+    File longbow_passed_reads_index = if (use_subreads) then MergeAllLongbowPassedReads.merged_bai else MergeAllLongbowPassedReads_S2e.merged_bai
+    File longbow_failed_reads = if (use_subreads) then MergeAllLongbowFailedReads.merged_bam else MergeAllLongbowFailedReads_S2e.merged_bam
+    File longbow_failed_reads_index = if (use_subreads) then MergeAllLongbowFailedReads.merged_bai else MergeAllLongbowFailedReads_S2e.merged_bai
 
-    # Merge all CCS bams together for this flowcell:
-    call Utils.MergeBams as MergeAllCCSBams { input: bams = MergeChunks.merged_bam, prefix = "~{SM[0]}.~{ID[0]}.ccs" }
+    # Merge all CCS bams together for this Subread BAM:
+    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads }
+    call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads }
+    call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationstoAlignedBam.output_bam }
+    call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam }
+    call Utils.MergeBams as MergePrimaryTranscriptomeAlignedArrayElements { input: bams = CopyContigNameToReadTag.output_bam }
 
-    # Merge all CCS reports together for this flowcell:
-    call PB.MergeCCSReports as MergeAllCCSReports { input: reports = MergeCCSReports.report }
+    # PbIndex some key files:
+    call PB.PBIndex as PbIndexPrimaryTranscriptomeAlignedArrayElements {
+        input:
+            bam = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam
+    }
+
+    # Merge the 10x stats:
+    if ( ! is_SIRV_data ) {
+        call Utils.MergeCountTsvFiles as Merge10XStats_1 {
+            input:
+                count_tsv_files = select_all(TenxAnnotateArrayElements.stats)
+        }
+    }
+
+    # Merge all CCS reports together for this Subread BAM:
+    Array[File] ccs_reports_to_merge = if use_subreads then select_all(CCS.report) else select_all(FindCCSReport.ccs_report)
+    call PB.MergeCCSReports as MergeCCSReports { input: reports = ccs_reports_to_merge }
+
+    # Collect metrics on the subreads bam:
+    RuntimeAttr subreads_sam_stats_runtime_attrs = object {
+        cpu_cores:          2,
+        mem_gb:             8,
+        disk_gb:            ceil(3 * size(reads_bam, "GiB")),
+        boot_disk_gb:       10,
+        preemptible_tries:  0,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-metrics:0.1.8"
+    }
+    call AM.SamtoolsStats as CalcSamStatsOnInputBam {
+        input:
+            bam = reads_bam,
+            runtime_attr_override = subreads_sam_stats_runtime_attrs
+    }
 
     ##########
     # Quantify Transcripts:
@@ -561,16 +624,16 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     call UMI_TOOLS.Run_Group as UMIToolsGroup {
         input:
-            aligned_transcriptome_reads = MergeArrayElementsForQuant.merged_bam,
-            aligned_transcriptome_reads_index = MergeArrayElementsForQuant.merged_bai,
+            aligned_transcriptome_reads = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
+            aligned_transcriptome_reads_index = MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
             do_per_cell = !is_SIRV_data,
-            prefix = "~{SM[0]}.~{ID[0]}.umi_tools_group"
+            prefix = "~{SM}.~{ID}.umi_tools_group"
     }
 
     call TX_POST.CreateCountMatrixFromAnnotatedBam {
         input:
             annotated_transcriptome_bam = UMIToolsGroup.output_bam,
-            prefix = "~{SM[0]}.~{ID[0]}.gene_tx_expression_count_matrix"
+            prefix = "~{SM}.~{ID}.gene_tx_expression_count_matrix"
     }
 
     # Only create the anndata objects if we're looking at real genomic data:
@@ -579,47 +642,54 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 count_matrix_tsv = CreateCountMatrixFromAnnotatedBam.count_matrix,
                 gencode_gtf_file = genome_annotation_gtf,
-                prefix = "~{SM[0]}.~{ID[0]}.gene_tx_expression_count_matrix"
+                prefix = "~{SM}.~{ID}.gene_tx_expression_count_matrix"
         }
     }
 
-    ##########
-    # Metrics and plots
-    ##########
+    ############################################################
+    #               __  __      _        _
+    #              |  \/  | ___| |_ _ __(_) ___ ___
+    #              | |\/| |/ _ \ __| '__| |/ __/ __|
+    #              | |  | |  __/ |_| |  | | (__\__ \
+    #              |_|  |_|\___|\__|_|  |_|\___|___/
+    #
+    ############################################################
 
-    String base_out_dir = outdir + "/" + DIR[0] + "/" + WdlExecutionStartTimestamp.timestamp_string
+    String base_out_dir = outdir + "/" + DIR + "/" + WdlExecutionStartTimestamp.timestamp_string
     String metrics_out_dir = base_out_dir + "/metrics"
 
     # Aligned CCS Metrics:
-    call RM.CalculateAndFinalizeReadMetrics as AlignedCCSMetrics {
+    call RM.CalculateAndFinalizeReadMetrics as GenomeAlignedArrayElementMetrics {
         input:
-            bam_file = MergeAllAlignedCCSBams.merged_bam,
-            bam_index = MergeAllAlignedCCSBams.merged_bai,
+            bam_file = MergeGenomeAlignedExtractedArrayElements.merged_bam,
+            bam_index = MergeGenomeAlignedExtractedArrayElements.merged_bai,
             ref_dict = ref_fasta_dict,
 
-            base_metrics_out_dir = metrics_out_dir + "/aligned_ccs_metrics"
+            base_metrics_out_dir = metrics_out_dir + "/genome_aligned_array_element_metrics"
     }
 
     # Aligned Array Element Metrics:
-    call RM.CalculateAndFinalizeAlternateReadMetrics as AlignedArrayElementMetrics {
+    call RM.CalculateAndFinalizeAlternateReadMetrics as TranscriptomeAlignedArrayElementMetrics {
         input:
-            bam_file = MergeAnnotatedAlignedArrayElements.merged_bam,
-            bam_index = MergeAnnotatedAlignedArrayElements.merged_bai,
+            bam_file = MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+            bam_index = MergeTranscriptomeAlignedExtractedArrayElements.merged_bai,
             ref_dict = transcriptome_ref_fasta_dict,
 
-            base_metrics_out_dir = metrics_out_dir + "/aligned_array_element_metrics"
+            base_metrics_out_dir = metrics_out_dir + "/transcriptome_aligned_array_element_metrics"
     }
 
     # If we aren't using subreads, all the CCS reports are the same and we should not merge them!
-    File final_ccs_report = if use_subreads then MergeAllCCSReports.report else select_first(flatten(FindCCSReport.ccs_report))
+    File final_ccs_report = if use_subreads then MergeCCSReports.report else select_first(flatten(FindCCSReport.ccs_report))
 
-    ##########
-    # Create Report:
-    ##########
+    ##########################################################################################
+    #         ____                _                ____                       _
+    #        / ___|_ __ ___  __ _| |_ ___         |  _ \ ___ _ __   ___  _ __| |_
+    #       | |   | '__/ _ \/ _` | __/ _ \        | |_) / _ \ '_ \ / _ \| '__| __|
+    #       | |___| | |  __/ (_| | ||  __/        |  _ <  __/ |_) | (_) | |  | |_
+    #        \____|_|  \___|\__,_|\__\___|        |_| \_\___| .__/ \___/|_|   \__|
+    #                                                       |_|
+    ##########################################################################################
 
-    ## NOTE: This assumes ONE file for both the raw input and the 10x array element stats!
-    ##       This should be fixed in version 2.
-    File complete_annotated_bam = if (! CheckForAnnotatedArrayReads.bam_has_annotations[0] ) then select_first([MergeAnnotatedReads_3.merged_bam]) else top_level_bam_files[0]
     RuntimeAttr create_report_runtime_attrs = object {
             preemptible_tries:  0
     }
@@ -627,116 +697,162 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         input:
             notebook_template                = jupyter_template_static,
 
-            sample_name                      = SM[0],
+            sample_name                      = SM,
 
-            subreads_stats                   = CalcSamStatsOnInputBam.raw_stats[0],
-            ccs_reads_stats                  = AlignedCCSMetrics.sam_stats_raw_stats,
-            array_elements_stats             = AlignedArrayElementMetrics.sam_stats_raw_stats,
+            subreads_stats                   = CalcSamStatsOnInputBam.raw_stats,
+            ccs_reads_stats                  = GenomeAlignedArrayElementMetrics.sam_stats_raw_stats,
+            array_elements_stats             = TranscriptomeAlignedArrayElementMetrics.sam_stats_raw_stats,
             ccs_report_file                  = final_ccs_report,
 
-            ccs_bam_file                     = MergeAllCCSBams.merged_bam,
-            array_element_bam_file           = MergeAnnotatedAlignedArrayElements.merged_bam,
-            ccs_rejected_bam_file            = MergeAllCCSRejectedBams.merged_bam,
+            raw_ccs_bam_file                 = ccs_corrected_reads,
+            array_element_bam_file           = MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+            ccs_rejected_bam_file            = ccs_rejected_reads,
 
-            annotated_bam_file               = complete_annotated_bam,
+            annotated_bam_file               = annotated_ccs_reads,
 
-            longbow_passed_reads_file        = MergeLongbowFilterPassedReads_3.merged_bam,
-            longbow_failed_reads_file        = MergeLongbowFilterFailedReads_3.merged_bam,
+            longbow_passed_reads_file        = longbow_passed_reads,
+            longbow_failed_reads_file        = longbow_failed_reads,
 
-            zmw_subread_stats_file           = MergeShardedZmwSubreadStats.merged_tsv[0],
-            polymerase_read_lengths_file     = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv[0],
+            zmw_subread_stats_file           = MergeShardedZmwSubreadStats.merged_tsv,
+            polymerase_read_lengths_file     = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
 
-            ten_x_metrics_file               = Merge10XStats_2.merged_tsv,
+            ten_x_metrics_file               = Merge10XStats_1.merged_tsv,
             is_mas_seq_10_array              = is_mas_seq_10_array,
 
             workflow_dot_file                = workflow_dot_file,
-            prefix                           = SM[0] + "_MAS-seq_",
+            prefix                           = SM + "_MAS-seq_",
 
             runtime_attr_override            = create_report_runtime_attrs,
     }
 
-    ##########
-    # Finalize
-    ##########
+    ######################################################################
+    #             _____ _             _ _
+    #            |  ___(_)_ __   __ _| (_)_______
+    #            | |_  | | '_ \ / _` | | |_  / _ \
+    #            |  _| | | | | | (_| | | |/ /  __/
+    #            |_|   |_|_| |_|\__,_|_|_/___\___|
+    #
+    ######################################################################
 
     # NOTE: We key all finalization steps on the static report.
     #       This will prevent incomplete runs from being placed in the output folders.
 
-    # TODO: Should make this iterate through all found bam files, not just the first one.  This seems to be the case for all workflows right now though...
+    #########################
+    #########################
+    #########################
+    #
+    #
+    # OK.  Now we should pick a solid directory structure here.
+    # Let's make it sensical so that we know where to find everything.
+    # At this point we're close, but not quite there.
+    #
+    #
+    # annotated_array_elements
+    # MAS-seq_array
+    # metrics
+    # quant
+    # report
+    #
+    #########################
+    #########################
+    #########################
 
-    # Finalize the notebook:
-    String static_report_dir = metrics_out_dir + "/report"
-    call FF.FinalizeToDir as FinalizeStaticReport {
+    String array_element_dir = base_out_dir + "/annotated_array_elements"
+    String intermediate_reads_dir = base_out_dir + "/intermediate_reads"
+    String quant_dir = base_out_dir + "/quant"
+    String report_dir = base_out_dir + "/report"
+
+    ##############################################################################################################
+    # Finalize the final annotated, aligned array elements:
+    call FF.FinalizeToDir as FinalizeQuantifiedArrayElements {
         input:
             files = [
-                GenerateStaticReport.populated_notebook,
-                GenerateStaticReport.html_report,
-                GenerateStaticReport.pdf_report
+                MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
+                MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
+                PbIndexPrimaryTranscriptomeAlignedArrayElements.pbindex
             ],
-            outdir = static_report_dir,
+            outdir = array_element_dir,
             keyfile = GenerateStaticReport.html_report
     }
 
-    # Finalize all the Extracted Bounded Regions data:
-    String annotatedReadsDir = base_out_dir + "/longbow"
-    call FF.FinalizeToDir as FinalizeAnnotatedArrayElements {
+    ##############################################################################################################
+    # Finalize the intermediate reads files (from raw CCS corrected reads through split array elements)
+    call FF.FinalizeToDir as FinalizeArrayReads {
         input:
             files = [
-                MergeArrayElements_3.merged_bam,
-                MergeArrayElements_3.merged_bai,
-                PbIndexArrayElements.pbindex
+                ccs_corrected_reads,
+                ccs_corrected_reads_index,
+                ccs_rejected_reads,
+                ccs_rejected_reads_index,
+                annotated_ccs_reads,
+                annotated_ccs_reads_index,
+                longbow_passed_ccs_reads,
+                longbow_passed_ccs_reads_index,
+                longbow_failed_ccs_reads,
+                longbow_failed_ccs_reads_index,
+                ccs_reclaimable_reads,
+                ccs_reclaimable_reads_index,
+                annotated_ccs_reclaimable_reads,
+                annotated_ccs_reclaimable_reads_index,
+                ccs_reclaimed_reads,
+                ccs_reclaimed_reads_index,
+                longbow_failed_ccs_unreclaimable_reads,
+                longbow_failed_ccs_unreclaimable_reads_index,
+                longbow_passed_reads,
+                longbow_passed_reads_index,
+                longbow_failed_reads,
+                longbow_failed_reads_index
             ],
-            outdir = annotatedReadsDir,
+            outdir = intermediate_reads_dir + "/array_bams",
             keyfile = GenerateStaticReport.html_report
     }
 
-    if ( ! CheckForAnnotatedArrayReads.bam_has_annotations[0] ) {
-        call FF.FinalizeToDir as FinalizeAnnotatedReads {
-            input:
-                files = select_all([
-                    MergeAnnotatedReads_3.merged_bam,
-                    MergeAnnotatedReads_3.merged_bai,
-                    PbIndexAnnotatedReads.pbindex
-                ]),
-                outdir = annotatedReadsDir,
-                keyfile = GenerateStaticReport.html_report
-        }
-    }
-
-    # Finalize all the Quantification data:
-    String quantDir = base_out_dir + "/quant"
-    call FF.FinalizeToDir as FinalizeQuantResults {
+    call FF.FinalizeToDir as FinalizeArrayElementReads {
         input:
             files = [
-                MergeArrayElementsForQuant.merged_bam,
-                MergeArrayElementsForQuant.merged_bai,
-
-                UMIToolsGroup.output_bam,
-                UMIToolsGroup.output_tsv,
-                CreateCountMatrixFromAnnotatedBam.count_matrix
+                MergeCbcUmiArrayElements.merged_bam,
+                MergeCbcUmiArrayElements.merged_bai,
+                MergeLongbowExtractedArrayElements.merged_bam,
+                MergeLongbowExtractedArrayElements.merged_bai,
+                MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+                MergeTranscriptomeAlignedExtractedArrayElements.merged_bai,
+                MergeGenomeAlignedExtractedArrayElements.merged_bam,
+                MergeGenomeAlignedExtractedArrayElements.merged_bai,
             ],
-            outdir = quantDir,
+            outdir = intermediate_reads_dir + "/array_element_bams",
             keyfile = GenerateStaticReport.html_report
     }
-    # Finalize our anndata objects if we have them:
-    if ( ! is_SIRV_data ) {
-        call FF.FinalizeToDir as FinalizeProcessedQuantResults {
-            input:
-                files = select_all([
-                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_pickle,
-                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_pickle,
-                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_h5ad,
-                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_h5ad,
-                ]),
-                outdir = quantDir,
-                keyfile = GenerateStaticReport.html_report
-        }
+
+    ##############################################################################################################
+    # Finalize Metrics:
+    call FF.FinalizeToDir as FinalizeSamStatsOnInputBam {
+        input:
+            # an unfortunate hard-coded path here:
+            outdir = metrics_out_dir + "/input_bam_stats",
+            files = [
+                CalcSamStatsOnInputBam.raw_stats,
+                CalcSamStatsOnInputBam.summary_stats,
+                CalcSamStatsOnInputBam.first_frag_qual,
+                CalcSamStatsOnInputBam.last_frag_qual,
+                CalcSamStatsOnInputBam.first_frag_gc_content,
+                CalcSamStatsOnInputBam.last_frag_gc_content,
+                CalcSamStatsOnInputBam.acgt_content_per_cycle,
+                CalcSamStatsOnInputBam.insert_size,
+                CalcSamStatsOnInputBam.read_length_dist,
+                CalcSamStatsOnInputBam.indel_distribution,
+                CalcSamStatsOnInputBam.indels_per_cycle,
+                CalcSamStatsOnInputBam.coverage_distribution,
+                CalcSamStatsOnInputBam.gc_depth
+            ],
+            keyfile = GenerateStaticReport.html_report
     }
 
     # Finalize all the 10x metrics here:
     # NOTE: We only run the 10x tool if we have real (non-SIRV) data, so we have to have this conditional here:
     if (! is_SIRV_data) {
         String tenXToolMetricsDir = metrics_out_dir + "/ten_x_tool_metrics"
+
+        ## TODO: MAKE THIS COPY OVER ALL 10X STATS!  IT'S ONLY GETTING FROM THE FIRST SHARD OMG!!!!!!!1!!
         scatter ( i in range(length(TenxAnnotateArrayElements.output_bam[0]))) {
             call FF.FinalizeToDir as FinalizeTenXRgStats {
                 input:
@@ -753,56 +869,11 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         call FF.FinalizeToDir as FinalizeTenXOverallStats {
             input:
                 files = [
-                    select_first([Merge10XStats_2.merged_tsv])
+                    select_first([Merge10XStats_1.merged_tsv])
                 ],
                 outdir = tenXToolMetricsDir,
                 keyfile = GenerateStaticReport.html_report
         }
-    }
-
-    call FF.FinalizeToDir as FinalizeAnnotatedAlignedArrayElements {
-        input:
-            files = [ MergeAnnotatedAlignedArrayElements.merged_bam, MergeAnnotatedAlignedArrayElements.merged_bai ],
-            outdir = base_out_dir + "/annotated_aligned_array_elements",
-            keyfile = GenerateStaticReport.html_report
-    }
-
-    call FF.FinalizeToDir as FinalizeAlignedArrayElements {
-        input:
-            files = [ MergeAlignedArrayElements.merged_bam, MergeAlignedArrayElements.merged_bai ],
-            outdir = base_out_dir + "/aligned_array_elements",
-            keyfile = GenerateStaticReport.html_report
-    }
-
-    call FF.FinalizeToDir as FinalizeArrayElements {
-        input:
-            files = [ MergeAnnotatedArrayElements.merged_bam, MergeAnnotatedArrayElements.merged_bai ],
-            outdir = base_out_dir + "/annotated_array_elements",
-            keyfile = GenerateStaticReport.html_report
-    }
-
-    call FF.FinalizeToDir as FinalizeLongbowFilteredBams {
-        input:
-            files = [
-                    MergeLongbowFilterPassedReads_3.merged_bam, MergeLongbowFilterPassedReads_3.merged_bai,
-                    MergeLongbowFilterFailedReads_3.merged_bam, MergeLongbowFilterFailedReads_3.merged_bai,
-            ],
-            outdir = annotatedReadsDir,
-            keyfile = GenerateStaticReport.html_report
-    }
-
-    call FF.FinalizeToDir as FinalizeAlignedCCSBams {
-        input:
-            files = [ MergeAllAlignedCCSBams.merged_bam, MergeAllAlignedCCSBams.merged_bai ],
-            outdir = base_out_dir + "/merged_bams/aligned",
-            keyfile = GenerateStaticReport.html_report
-    }
-
-    call FF.FinalizeToDir as FinalizeCCSBams {
-        input:
-            files = [ MergeAllCCSBams.merged_bam, MergeAllCCSBams.merged_bai ],
-            outdir = base_out_dir + "/merged_bams/unaligned",
-            keyfile = GenerateStaticReport.html_report
     }
 
     call FF.FinalizeToDir as FinalizeCCSMetrics {
@@ -827,18 +898,49 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 outdir = metrics_out_dir + "/array_stats",
                 keyfile = GenerateStaticReport.html_report
         }
+    }
 
-        call FF.FinalizeToDir as FinalizeAlignedCCSRejectedBams {
+    ##############################################################################################################
+    # Finalize all the Quantification data:
+    call FF.FinalizeToDir as FinalizeQuantResults {
+        input:
+            files = [
+                UMIToolsGroup.output_bam,
+                UMIToolsGroup.output_tsv,
+                CreateCountMatrixFromAnnotatedBam.count_matrix
+            ],
+            outdir = quant_dir,
+            keyfile = GenerateStaticReport.html_report
+    }
+    # Finalize our anndata objects if we have them:
+    if ( ! is_SIRV_data ) {
+        call FF.FinalizeToDir as FinalizeProcessedQuantResults {
             input:
-                files = [
-                    select_first([MergeAllCCSRejectedBams.merged_bam]),
-                    select_first([MergeAllCCSRejectedBams.merged_bai])
-                ],
-                outdir = base_out_dir + "/merged_bams/ccs_rejected",
+                files = select_all([
+                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_pickle,
+                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_pickle,
+                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_h5ad,
+                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_h5ad,
+                ]),
+                outdir = quant_dir,
                 keyfile = GenerateStaticReport.html_report
         }
     }
 
+    ##############################################################################################################
+    # Finalize the report:
+    call FF.FinalizeToDir as FinalizeStaticReport {
+        input:
+            files = [
+                GenerateStaticReport.populated_notebook,
+                GenerateStaticReport.html_report,
+                GenerateStaticReport.pdf_report
+            ],
+            outdir = report_dir,
+            keyfile = GenerateStaticReport.html_report
+    }
+
+    ##############################################################################################################
     # Write out completion file so in the future we can be 100% sure that this run was good:
     call FF.WriteCompletionFile {
         input:

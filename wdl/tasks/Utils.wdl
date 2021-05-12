@@ -1197,3 +1197,35 @@ task Bamtools {
         docker:                 select_first([runtime_attr.docker,            default_attr.docker])
     }
 }
+
+task FailWithWarning {
+    input {
+        String warning
+    }
+    command <<<
+        set -e
+
+        echo "~{warning}"
+        echo "~{warning}" 1>&2
+        false
+    >>>
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             2,
+        disk_gb:            10,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        2,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-finalize:0.1.2"
+    }
+    runtime {
+        cpu:                    default_attr.cpu_cores
+        memory:                 default_attr.mem_gb + " GiB"
+        disks: "local-disk " +  default_attr.disk_gb + " HDD"
+        bootDiskSizeGb:         default_attr.boot_disk_gb
+        preemptible:            default_attr.preemptible_tries
+        maxRetries:             default_attr.max_retries
+        docker:                 default_attr.docker
+    }
+}
