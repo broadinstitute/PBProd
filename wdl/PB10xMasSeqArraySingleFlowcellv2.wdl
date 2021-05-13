@@ -918,7 +918,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             files = [
                 GenerateStaticReport.populated_notebook,
                 GenerateStaticReport.html_report,
-                GenerateStaticReport.pdf_report
             ],
             outdir = report_dir,
             keyfile = GenerateStaticReport.html_report

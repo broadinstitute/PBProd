@@ -160,9 +160,6 @@ task PB10xMasSeqSingleFlowcellReport {
         # Convert the notebook output we created just above here to the HTML report:
         jupyter nbconvert ~{nb_name} --to html --no-prompt --no-input --debug --ExecutePreprocessor.timeout=3600
 
-        # One more for good measure - make a PDF so we don't need to wait for the browser all the time.
-        jupyter nbconvert ~{nb_name} --to pdf --no-prompt --no-input --debug --ExecutePreprocessor.timeout=3600
-
         # Create a tar.gz of the figures directory:
         tar -zcf figures.tar.gz figures
     >>>
@@ -170,7 +167,6 @@ task PB10xMasSeqSingleFlowcellReport {
     output {
         File populated_notebook = nb_name
         File html_report = html_out
-        File pdf_report = pdf_out
         File figures_tar_gz = "figures.tar.gz"
         File generated_config = "mas-seq_qc_inputs.config"
     }
