@@ -554,28 +554,30 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     }
 
     # Alias out the data we need to pass into stuff later:
-    File ccs_corrected_reads = if (use_subreads) then MergeCCSReads.merged_bam else MergeCCSRqFilteredReads.merged_bam
-    File ccs_corrected_reads_index = if (use_subreads) then MergeCCSReads.merged_bai else MergeCCSRqFilteredReads.merged_bai
-    File ccs_rejected_reads = if (use_subreads) then MergeCCSRejectedReads.merged_bam else MergeCCSRqRejectedReads.merged_bam
-    File ccs_rejected_reads_index = if (use_subreads) then MergeCCSRejectedReads.merged_bai else MergeCCSRqRejectedReads.merged_bai
-    File annotated_ccs_reads = if (use_subreads) then MergeAnnotatedCCSReads.merged_bam else MergeAnnotatedCCSReads_S2e.merged_bam
-    File annotated_ccs_reads_index = if (use_subreads) then MergeAnnotatedCCSReads.merged_bai else MergeAnnotatedCCSReads_S2e.merged_bai
-    File longbow_passed_ccs_reads = if (use_subreads) then MergeLongbowPassedCCSReads.merged_bam else MergeLongbowPassedCCSReads_S2e.merged_bam
-    File longbow_passed_ccs_reads_index = if (use_subreads) then MergeLongbowPassedCCSReads.merged_bai else MergeLongbowPassedCCSReads_S2e.merged_bai
-    File longbow_failed_ccs_reads = if (use_subreads) then MergeLongbowFailedCCSReads.merged_bam else MergeLongbowFailedCCSReads_S2e.merged_bam
-    File longbow_failed_ccs_reads_index = if (use_subreads) then MergeLongbowFailedCCSReads.merged_bai else MergeLongbowFailedCCSReads_S2e.merged_bai
-    File ccs_reclaimable_reads = if (use_subreads) then MergeCCSReclaimableReads.merged_bam else MergeCCSReclaimableReads_S2e.merged_bam
-    File ccs_reclaimable_reads_index = if (use_subreads) then MergeCCSReclaimableReads.merged_bai else MergeCCSReclaimableReads_S2e.merged_bai
+    File ccs_corrected_reads = if (use_subreads) then select_first([MergeCCSReads.merged_bam]) else select_first([MergeCCSRqFilteredReads.merged_bam])
+    File ccs_corrected_reads_index = if (use_subreads) then select_first([MergeCCSReads.merged_bai]) else select_first([MergeCCSRqFilteredReads.merged_bai])
+    File ccs_rejected_reads = if (use_subreads) then select_first([MergeCCSRejectedReads.merged_bam]) else select_first([MergeCCSRqRejectedReads.merged_bam])
+    File ccs_rejected_reads_index = if (use_subreads) then select_first([MergeCCSRejectedReads.merged_bai]) else select_first([MergeCCSRqRejectedReads.merged_bai])
+    File annotated_ccs_reads = if (use_subreads) then select_first([MergeAnnotatedCCSReads.merged_bam]) else select_first([MergeAnnotatedCCSReads_S2e.merged_bam])
+    File annotated_ccs_reads_index = if (use_subreads) then select_first([MergeAnnotatedCCSReads.merged_bai]) else select_first([MergeAnnotatedCCSReads_S2e.merged_bai])
+    File longbow_passed_ccs_reads = if (use_subreads) then select_first([MergeLongbowPassedCCSReads.merged_bam]) else select_first([MergeLongbowPassedCCSReads_S2e.merged_bam])
+    File longbow_passed_ccs_reads_index = if (use_subreads) then select_first([MergeLongbowPassedCCSReads.merged_bai]) else select_first([MergeLongbowPassedCCSReads_S2e.merged_bai])
+    File longbow_failed_ccs_reads = if (use_subreads) then select_first([MergeLongbowFailedCCSReads.merged_bam]) else select_first([MergeLongbowFailedCCSReads_S2e.merged_bam])
+    File longbow_failed_ccs_reads_index = if (use_subreads) then select_first([MergeLongbowFailedCCSReads.merged_bai]) else select_first([MergeLongbowFailedCCSReads_S2e.merged_bai])
+    File ccs_reclaimable_reads = if (use_subreads) then select_first([MergeCCSReclaimableReads.merged_bam]) else select_first([MergeCCSReclaimableReads_S2e.merged_bam])
+    File ccs_reclaimable_reads_index = if (use_subreads) then select_first([MergeCCSReclaimableReads.merged_bai]) else select_first([MergeCCSReclaimableReads_S2e.merged_bai])
+    
     File annotated_ccs_reclaimable_reads = if (use_subreads) then select_first([MergeCCSReclaimableAnnotatedReads.merged_bam]) else select_first([MergeCCSReclaimableAnnotatedReads_S2e.merged_bam])
-    File annotated_ccs_reclaimable_reads_index = if (use_subreads) then MergeCCSReclaimableAnnotatedReads.merged_bai else MergeCCSReclaimableAnnotatedReads_S2e.merged_bai
-    File ccs_reclaimed_reads = if (use_subreads) then MergeLongbowPassedReclaimable.merged_bam else MergeLongbowPassedReclaimable_S2e.merged_bam
-    File ccs_reclaimed_reads_index = if (use_subreads) then MergeLongbowPassedReclaimable.merged_bai else MergeLongbowPassedReclaimable_S2e.merged_bai
-    File longbow_failed_ccs_unreclaimable_reads = if (use_subreads) then MergeLongbowFailedReclaimable.merged_bam else MergeLongbowFailedReclaimable_S2e.merged_bam
-    File longbow_failed_ccs_unreclaimable_reads_index = if (use_subreads) then MergeLongbowFailedReclaimable.merged_bai else MergeLongbowFailedReclaimable_S2e.merged_bai
-    File longbow_passed_reads = if (use_subreads) then MergeAllLongbowPassedReads.merged_bam else MergeAllLongbowPassedReads_S2e.merged_bam
-    File longbow_passed_reads_index = if (use_subreads) then MergeAllLongbowPassedReads.merged_bai else MergeAllLongbowPassedReads_S2e.merged_bai
-    File longbow_failed_reads = if (use_subreads) then MergeAllLongbowFailedReads.merged_bam else MergeAllLongbowFailedReads_S2e.merged_bam
-    File longbow_failed_reads_index = if (use_subreads) then MergeAllLongbowFailedReads.merged_bai else MergeAllLongbowFailedReads_S2e.merged_bai
+    
+    File annotated_ccs_reclaimable_reads_index = if (use_subreads) then select_first([MergeCCSReclaimableAnnotatedReads.merged_bai]) else select_first([MergeCCSReclaimableAnnotatedReads_S2e.merged_bai])
+    File ccs_reclaimed_reads = if (use_subreads) then select_first([MergeLongbowPassedReclaimable.merged_bam]) else select_first([MergeLongbowPassedReclaimable_S2e.merged_bam])
+    File ccs_reclaimed_reads_index = if (use_subreads) then select_first([MergeLongbowPassedReclaimable.merged_bai]) else select_first([MergeLongbowPassedReclaimable_S2e.merged_bai])
+    File longbow_failed_ccs_unreclaimable_reads = if (use_subreads) then select_first([MergeLongbowFailedReclaimable.merged_bam]) else select_first([MergeLongbowFailedReclaimable_S2e.merged_bam])
+    File longbow_failed_ccs_unreclaimable_reads_index = if (use_subreads) then select_first([MergeLongbowFailedReclaimable.merged_bai]) else select_first([MergeLongbowFailedReclaimable_S2e.merged_bai])
+    File longbow_passed_reads = if (use_subreads) then select_first([MergeAllLongbowPassedReads.merged_bam]) else select_first([MergeAllLongbowPassedReads_S2e.merged_bam])
+    File longbow_passed_reads_index = if (use_subreads) then select_first([MergeAllLongbowPassedReads.merged_bai]) else select_first([MergeAllLongbowPassedReads_S2e.merged_bai])
+    File longbow_failed_reads = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bam]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bam])
+    File longbow_failed_reads_index = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bai]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bai])
 
     # Merge all CCS bams together for this Subread BAM:
     call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads }
@@ -679,7 +681,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     }
 
     # If we aren't using subreads, all the CCS reports are the same and we should not merge them!
-    File final_ccs_report = if use_subreads then MergeCCSReports.report else select_first(flatten(FindCCSReport.ccs_report))
+    File final_ccs_report = if use_subreads then MergeCCSReports.report else select_first(FindCCSReport.ccs_report)
 
     ##########################################################################################
     #         ____                _                ____                       _
@@ -852,15 +854,15 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if (! is_SIRV_data) {
         String tenXToolMetricsDir = metrics_out_dir + "/ten_x_tool_metrics"
 
-        ## TODO: MAKE THIS COPY OVER ALL 10X STATS!  IT'S ONLY GETTING FROM THE FIRST SHARD OMG!!!!!!!1!!
-        scatter ( i in range(length(TenxAnnotateArrayElements.output_bam[0]))) {
+        ## TODO: Make this consolidate the stats first:
+        scatter ( i in range(length(TenxAnnotateArrayElements.output_bam))) {
             call FF.FinalizeToDir as FinalizeTenXRgStats {
                 input:
                     files = select_all([
-                        TenxAnnotateArrayElements.barcode_stats[0][i],
-                        TenxAnnotateArrayElements.starcode[0][i],
-                        TenxAnnotateArrayElements.stats[0][i],
-                        TenxAnnotateArrayElements.timing_info[0][i]
+                        TenxAnnotateArrayElements.barcode_stats[i],
+                        TenxAnnotateArrayElements.starcode[i],
+                        TenxAnnotateArrayElements.stats[i],
+                        TenxAnnotateArrayElements.timing_info[i]
                     ]),
                     outdir = tenXToolMetricsDir + "/" + i,
                     keyfile = GenerateStaticReport.html_report
@@ -887,14 +889,14 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if (use_subreads) {
         call FF.FinalizeToDir as FinalizeZmwSubreadStats {
             input:
-                files = select_all(MergeShardedZmwSubreadStats.merged_tsv),
+                files = select_all([MergeShardedZmwSubreadStats.merged_tsv]),
                 outdir = metrics_out_dir + "/ccs_metrics",
                 keyfile = GenerateStaticReport.html_report
         }
 
         call FF.FinalizeToDir as FinalizePolymeraseReadLengths {
             input:
-                files = select_all(CollectPolymeraseReadLengths.polymerase_read_lengths_tsv),
+                files = select_all([CollectPolymeraseReadLengths.polymerase_read_lengths_tsv]),
                 outdir = metrics_out_dir + "/array_stats",
                 keyfile = GenerateStaticReport.html_report
         }
