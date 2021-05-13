@@ -100,6 +100,22 @@ RUN wget https://github.com/yangao07/abPOA/releases/download/v1.1.0/abPOA-v1.1.0
 			&& make install_py
 
 ########################################
+# Install some more python packages so we can export plotly images:
+RUN pip install -U kaleido
+
+# This doesn't seem to be needed:
+#USER root
+#RUN mkdir -p /usr/local/bin
+#RUN cd /usr/local/bin \
+#			&& wget https://github.com/plotly/orca/releases/download/v1.3.1/orca-1.3.1.AppImage \
+#			&& chmod +x orca-1.3.1.AppImage
+#RUN apt-get install -y xvfb libgtk2.0-0 libgconf-2-4 chromium-browser
+#RUN echo '#!/bin/bash' > /usr/local/bin/orca \
+#			&& echo 'xvfb-run -a /path/to/orca-X.Y.Z-x86_64.AppImage "$@"' >> /usr/local/bin/orca \
+#			&& chmod +x /usr/local/bin/orca
+#USER jovyan
+
+########################################
 
 # When we run the container, start a server:
 CMD ["start-notebook.sh"]
