@@ -7,10 +7,11 @@ import tqdm
 import pysam
 
 
-def main(bam_name, aligned_bam_name, out_bam_name):
+def main(bam_name, aligned_bam_name, out_bam_name, ignore_tags=None):
 
     t_start = time.time()
 
+    # Tags to preserve (for now it isn't used):
     tag_names = []
     name_taglist_dict = dict()
     pysam.set_verbosity(0)  # silence message about the .bai file not being found
@@ -25,6 +26,14 @@ def main(bam_name, aligned_bam_name, out_bam_name):
         sys.exit(1)
     print("Input files verified.")
 
+    tags_to_ignore = set()
+    if ignore_tags:
+        print(f"Ignoring the following tags: {' '.join([t for t in ignore_tags])}")
+        for t in ignore_tags:
+            tags_to_ignore.add(t)
+            if t in tag_names:
+                tag_names.remove(t)
+
     print(f"Reading in tags from: {bam_name}")
     with pysam.AlignmentFile(
             bam_name, "rb", check_sq=False, require_index=False
@@ -36,8 +45,10 @@ def main(bam_name, aligned_bam_name, out_bam_name):
         for read in bam_file:
             tags_to_keep = []
             if len(tag_names) == 0:
-                # Keep all tags:
                 for t in read.get_tags():
+                    # Keep the tags we're not ignoring:
+                    if t[0] in tags_to_ignore:
+                        continue
                     tags_to_keep.append((t[0], t[1]))
             else:
                 # Keep only the tags we specified:
@@ -103,6 +114,11 @@ if __name__ == '__main__':
     required_named_args.add_argument('-o', '--out-name',
                                      help='Output bam file name', required=True)
 
+    optional_named_args = parser.add_argument_group('optional named arguments')
+    optional_named_args.add_argument('-i', '--ignore-tags', nargs='+',
+                                     help='Tags to ignore.  These tags will not be transferred to the resulting file.',
+                                     required=False)
+
     args = parser.parse_args()
 
-    main(args.bam, args.aligned_bam, args.out_name)
+    main(args.bam, args.aligned_bam, args.out_name, args.ignore_tags)
