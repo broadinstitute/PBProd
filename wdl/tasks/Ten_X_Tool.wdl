@@ -304,8 +304,6 @@ task RestoreAnnotationstoAlignedBam {
     String memory_log_file = "memory_use.txt"
     String output_name = basename(aligned_bam_file, ".bam") + ".AnnotationsRestored.bam"
 
-    String ignore_tags_string = sep(" ", tags_to_ignore)
-
     command {
 
         # Set up memory logging daemon:
@@ -328,7 +326,7 @@ task RestoreAnnotationstoAlignedBam {
         python3 /lrma/restore_annotations_to_aligned_bam.py \
             --bam ~{annotated_bam_file} \
             --aligned-bam ~{aligned_bam_file} \
-            --ignore-tags ~{ignore_tags_string} \
+            --ignore-tags ~{sep=" " tags_to_ignore} \
             --out-name ~{output_name}
 
         endTime=`date +%s.%N`
