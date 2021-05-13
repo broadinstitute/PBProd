@@ -923,6 +923,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             keyfile = GenerateStaticReport.html_report
     }
 
+    call FF.FinalizeTarGzContents as FinalizeReportFigures {
+        input:
+            tar_gz_file = GenerateStaticReport.figures_tar_gz,
+            outdir = report_dir,
+            keyfile = GenerateStaticReport.html_report
+    }
+
     ##############################################################################################################
     # Write out completion file so in the future we can be 100% sure that this run was good:
     call FF.WriteCompletionFile {
