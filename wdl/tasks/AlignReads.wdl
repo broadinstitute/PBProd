@@ -38,7 +38,7 @@ task Minimap2 {
     command <<<
         set -euxo pipefail
 
-        rg_len=$(echo '~{RG}' | wc -c | awk '{print $NF}')
+        rg_len=$(echo -n '~{RG}' | wc -c | awk '{print $NF}')
         if [[ $rg_len -ne 0 ]] ; then
             # Sometimes we have to sanitize our read groups:
             sanitized_read_group=$( echo "~{RG}" | sed -e 's# .*##g' | sed 's#\t.*##g' )
