@@ -510,21 +510,21 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if (use_subreads) {
         # Sequel II Data.
         # CCS Passed:
-        call Utils.MergeBams as MergeCCSReads { input: bams = select_all(CCS.consensus) }
-        call Utils.MergeBams as MergeCCSRejectedReads { input: bams = select_all(ExtractUncorrectedReads.uncorrected) }
-        call Utils.MergeBams as MergeAnnotatedCCSReads { input: bams = select_all(annotated_ccs_file) }
-        call Utils.MergeBams as MergeLongbowPassedCCSReads { input: bams = select_all(FilterCCSReads.passed_reads) }
-        call Utils.MergeBams as MergeLongbowFailedCCSReads { input: bams = select_all(FilterCCSReads.failed_reads) }
+        call Utils.MergeBams as MergeCCSReads { input: bams = select_all(CCS.consensus), prefix = SM + "_ccs_reads" }
+        call Utils.MergeBams as MergeCCSRejectedReads { input: bams = select_all(ExtractUncorrectedReads.uncorrected), prefix = SM + "_ccs_rejected_reads" }
+        call Utils.MergeBams as MergeAnnotatedCCSReads { input: bams = select_all(annotated_ccs_file), prefix = SM + "_ccs_reads_annotated" }
+        call Utils.MergeBams as MergeLongbowPassedCCSReads { input: bams = select_all(FilterCCSReads.passed_reads), prefix = SM + "_ccs_reads_annotated_longbow_passed" }
+        call Utils.MergeBams as MergeLongbowFailedCCSReads { input: bams = select_all(FilterCCSReads.failed_reads), prefix = SM + "_ccs_reads_annotated_longbow_failed" }
 
         # CCS Failed / Reclaimable:
-        call Utils.MergeBams as MergeCCSReclaimableReads { input: bams = select_all(ExtractCcsReclaimableReads.bam_out) }
-        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads { input: bams = select_all(annotated_reclaimable_file) }
-        call Utils.MergeBams as MergeLongbowPassedReclaimable { input: bams = select_all(FilterReclaimableReads.passed_reads) }
-        call Utils.MergeBams as MergeLongbowFailedReclaimable { input: bams = select_all(FilterReclaimableReads.failed_reads) }
+        call Utils.MergeBams as MergeCCSReclaimableReads { input: bams = select_all(ExtractCcsReclaimableReads.bam_out), prefix = SM + "_ccs_rejected_reclaimable"  }
+        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads { input: bams = select_all(annotated_reclaimable_file), prefix = SM + "_ccs_rejected_reclaimable_annotated" }
+        call Utils.MergeBams as MergeLongbowPassedReclaimable { input: bams = select_all(FilterReclaimableReads.passed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_passed" }
+        call Utils.MergeBams as MergeLongbowFailedReclaimable { input: bams = select_all(FilterReclaimableReads.failed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_failed"  }
 
         # All Longbow Passed / Failed reads:
-        call Utils.MergeBams as MergeAllLongbowPassedReads { input: bams = select_all(MergeLongbowPassedReads.merged_bam) }
-        call Utils.MergeBams as MergeAllLongbowFailedReads { input: bams = select_all(MergeLongbowFailedReads.merged_bam) }
+        call Utils.MergeBams as MergeAllLongbowPassedReads { input: bams = select_all(MergeLongbowPassedReads.merged_bam), prefix = SM + "_all_longbow_passed"  }
+        call Utils.MergeBams as MergeAllLongbowFailedReads { input: bams = select_all(MergeLongbowFailedReads.merged_bam), prefix = SM + "_all_longbow_failed" }
 
         # Merge the sharded zmw subread stats:
         call Utils.MergeTsvFiles as MergeShardedZmwSubreadStats {
@@ -536,21 +536,21 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if (!use_subreads) {
         # Sequel IIe Data.
         # CCS Passed:
-        call Utils.MergeBams as MergeCCSRqFilteredReads { input: bams = select_all(FilterS2EByMinReadQuality.bam_out) }
-        call Utils.MergeBams as MergeCCSRqRejectedReads { input: bams = select_all(GetS2ERCcsRejectedReads.bam_out) }
-        call Utils.MergeBams as MergeAnnotatedCCSReads_S2e { input: bams = select_all(annotated_S2E_ccs_file) }
-        call Utils.MergeBams as MergeLongbowPassedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.passed_reads) }
-        call Utils.MergeBams as MergeLongbowFailedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.failed_reads) }
+        call Utils.MergeBams as MergeCCSRqFilteredReads { input: bams = select_all(FilterS2EByMinReadQuality.bam_out), prefix = SM + "_ccs_reads" }
+        call Utils.MergeBams as MergeCCSRqRejectedReads { input: bams = select_all(GetS2ERCcsRejectedReads.bam_out), prefix = SM + "_ccs_rejected_reads" }
+        call Utils.MergeBams as MergeAnnotatedCCSReads_S2e { input: bams = select_all(annotated_S2E_ccs_file), prefix = SM + "_ccs_reads_annotated" }
+        call Utils.MergeBams as MergeLongbowPassedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.passed_reads), prefix = SM + "_ccs_reads_annotated_longbow_passed" }
+        call Utils.MergeBams as MergeLongbowFailedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.failed_reads), prefix = SM + "_ccs_reads_annotated_longbow_failed" }
 
         # CCS Failed / Reclaimable:
-        call Utils.MergeBams as MergeCCSReclaimableReads_S2e { input: bams = select_all(ExtractS2ECcsReclaimableReads.bam_out) }
-        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads_S2e { input: bams = select_all(annotated_S2E_reclaimable_file) }
-        call Utils.MergeBams as MergeLongbowPassedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.passed_reads) }
-        call Utils.MergeBams as MergeLongbowFailedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.failed_reads) }
+        call Utils.MergeBams as MergeCCSReclaimableReads_S2e { input: bams = select_all(ExtractS2ECcsReclaimableReads.bam_out), prefix = SM + "_ccs_rejected_reclaimable" }
+        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads_S2e { input: bams = select_all(annotated_S2E_reclaimable_file), prefix = SM + "_ccs_rejected_reclaimable_annotated" }
+        call Utils.MergeBams as MergeLongbowPassedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.passed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_passed" }
+        call Utils.MergeBams as MergeLongbowFailedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.failed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_failed" }
 
         # All Longbow Passed / Failed reads:
-        call Utils.MergeBams as MergeAllLongbowPassedReads_S2e { input: bams = select_all(MergeLongbowS2EPassedReads.merged_bam) }
-        call Utils.MergeBams as MergeAllLongbowFailedReads_S2e { input: bams = select_all(MergeLongbowS2EFailedReads.merged_bam) }
+        call Utils.MergeBams as MergeAllLongbowPassedReads_S2e { input: bams = select_all(MergeLongbowS2EPassedReads.merged_bam), prefix = SM + "_all_longbow_passed" }
+        call Utils.MergeBams as MergeAllLongbowFailedReads_S2e { input: bams = select_all(MergeLongbowS2EFailedReads.merged_bam), prefix = SM + "_all_longbow_failed" }
     }
 
     # Alias out the data we need to pass into stuff later:
@@ -580,11 +580,11 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     File longbow_failed_reads_index = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bai]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bai])
 
     # Merge all CCS bams together for this Subread BAM:
-    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads }
-    call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads }
-    call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationstoAlignedBam.output_bam }
-    call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam }
-    call Utils.MergeBams as MergePrimaryTranscriptomeAlignedArrayElements { input: bams = CopyContigNameToReadTag.output_bam }
+    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads, prefix = SM + "_array_elements" }
+    call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
+    call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationstoAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned" }
+    call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned" }
+    call Utils.MergeBams as MergePrimaryTranscriptomeAlignedArrayElements { input: bams = CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments" }
 
     # PbIndex some key files:
     call PB.PBIndex as PbIndexPrimaryTranscriptomeAlignedArrayElements {
@@ -596,7 +596,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if ( ! is_SIRV_data ) {
         call Utils.MergeCountTsvFiles as Merge10XStats_1 {
             input:
-                count_tsv_files = select_all(TenxAnnotateArrayElements.stats)
+                count_tsv_files = select_all(TenxAnnotateArrayElements.stats),
+                prefix = SM + "_10x_stats"
         }
     }
 
@@ -629,13 +630,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             aligned_transcriptome_reads = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
             aligned_transcriptome_reads_index = MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
             do_per_cell = !is_SIRV_data,
-            prefix = "~{SM}.~{ID}.umi_tools_group"
+            prefix = "~{SM}_~{ID}_umi_tools_group"
     }
 
     call TX_POST.CreateCountMatrixFromAnnotatedBam {
         input:
             annotated_transcriptome_bam = UMIToolsGroup.output_bam,
-            prefix = "~{SM}.~{ID}.gene_tx_expression_count_matrix"
+            prefix = "~{SM}_~{ID}_gene_tx_expression_count_matrix"
     }
 
     # Only create the anndata objects if we're looking at real genomic data:
@@ -644,7 +645,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 count_matrix_tsv = CreateCountMatrixFromAnnotatedBam.count_matrix,
                 gencode_gtf_file = genome_annotation_gtf,
-                prefix = "~{SM}.~{ID}.gene_tx_expression_count_matrix"
+                prefix = "~{SM}_~{ID}_gene_tx_expression_count_matrix"
         }
     }
 
@@ -738,26 +739,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     # NOTE: We key all finalization steps on the static report.
     #       This will prevent incomplete runs from being placed in the output folders.
-
-    #########################
-    #########################
-    #########################
-    #
-    #
-    # OK.  Now we should pick a solid directory structure here.
-    # Let's make it sensical so that we know where to find everything.
-    # At this point we're close, but not quite there.
-    #
-    #
-    # annotated_array_elements
-    # MAS-seq_array
-    # metrics
-    # quant
-    # report
-    #
-    #########################
-    #########################
-    #########################
 
     String array_element_dir = base_out_dir + "/annotated_array_elements"
     String intermediate_reads_dir = base_out_dir + "/intermediate_reads"
