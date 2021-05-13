@@ -326,10 +326,10 @@ task RestoreAnnotationstoAlignedBam {
         source activate 10x_tool
 
         python3 /lrma/restore_annotations_to_aligned_bam.py \
-            --bam=~{annotated_bam_file} \
-            --aligned-bam=~{aligned_bam_file} \
-            --ignore-tags=~{ignore_tags_string} \
-            --out-name=~{output_name}
+            --bam ~{annotated_bam_file} \
+            --aligned-bam ~{aligned_bam_file} \
+            --ignore-tags ~{ignore_tags_string} \
+            --out-name ~{output_name}
 
         endTime=`date +%s.%N`
         echo "EndTime: $endTime" >> ~{timing_output_file}
