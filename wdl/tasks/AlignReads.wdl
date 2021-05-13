@@ -8,8 +8,9 @@ task Minimap2 {
         Array[File] reads
         File ref_fasta
 
-        String RG
         String map_preset
+
+        String RG = ""
 
         String prefix = "out"
         RuntimeAttr? runtime_attr_override
@@ -18,7 +19,7 @@ task Minimap2 {
     parameter_meta {
         reads:      "query sequences to be mapped and aligned"
         ref_fasta:  "reference fasta"
-        RG:         "read group information to be supplied to parameter '-R' (note that tabs should be input as '\t')"
+        RG:         "[optional] read group information to be supplied to parameter '-R' (note that tabs should be input as '\t')"
         map_preset: "preset to be used for minimap2 parameter '-x'"
         prefix:     "[default-valued] prefix for output BAM"
     }
@@ -32,16 +33,23 @@ task Minimap2 {
     Int cpus = 4
     Int mem = 30
 
-    command {
+    # This is a hack to fix the WDL parsing of ${} variables:
+    String DOLLAR = "$"
+    command <<<
         set -euxo pipefail
 
-        # Sometimes we have to sanitize our read groups:
-        sanitized_read_group=$( echo "~{RG}" | sed -e 's# .*##g' | sed 's#\t.*##g' )
+        rg_len=$(echo '~{RG}' | wc -c | awk '{print $NF}')
+        if [[ $rg_len -ne 0 ]] ; then
+            # Sometimes we have to sanitize our read groups:
+            sanitized_read_group=$( echo "~{RG}" | sed -e 's# .*##g' | sed 's#\t.*##g' )
 
-        echo "Original Read Group: ~{RG}"
-        echo "Sanitized Read Group: $sanitized_read_group"
+            echo "Original Read Group: ~{RG}"
+            echo "Sanitized Read Group: $sanitized_read_group"
 
-        MAP_PARAMS="-ayYL --MD --eqx -x ~{map_preset} -R $sanitized_read_group -t ~{cpus} ~{ref_fasta}"
+            MAP_PARAMS="-ayYL --MD --eqx -x ~{map_preset} -R $sanitized_read_group -t ~{cpus} ~{ref_fasta}"
+        else
+            MAP_PARAMS="-ayYL --MD --eqx -x ~{map_preset} -t ~{cpus} ~{ref_fasta}"
+        fi
         FILE="~{reads[0]}"
         FILES="~{sep=' ' reads}"
 
@@ -76,7 +84,7 @@ task Minimap2 {
 
         samtools sort -@~{cpus} -m~{mem}G --no-PG -o ~{prefix}.bam tmp.sam
         samtools index ~{prefix}.bam
-    }
+    >>>
 
     output {
         File aligned_bam = "~{prefix}.bam"
