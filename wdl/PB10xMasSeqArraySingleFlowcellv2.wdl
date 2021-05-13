@@ -441,7 +441,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
                 ref_fasta  = transcriptome_ref_fasta,
-                RG         = RG_array_elements,
                 map_preset = "splice:hq"
         }
 
@@ -449,7 +448,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
                 ref_fasta  = ref_fasta,
-                RG         = RG_consensus,
                 map_preset = "splice:hq"
         }
 
@@ -457,14 +455,16 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToTranscriptomeAlignedBam {
             input:
                 annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
-                aligned_bam_file = AlignArrayElements.aligned_bam
+                aligned_bam_file = AlignArrayElements.aligned_bam,
+                tags_to_ignore = []
         }
 
         # We need to restore the annotations we created with the 10x tool to the aligned reads.
         call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToGenomeAlignedBam {
             input:
                 annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
-                aligned_bam_file = AlignArrayElementsToGenome.aligned_bam
+                aligned_bam_file = AlignArrayElementsToGenome.aligned_bam,
+                tags_to_ignore = []
         }
 
         # To properly count our transcripts we must throw away the non-primary and unaligned reads:
