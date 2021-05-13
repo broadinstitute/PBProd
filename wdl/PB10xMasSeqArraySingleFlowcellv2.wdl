@@ -586,11 +586,12 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned" }
     call Utils.MergeBams as MergePrimaryTranscriptomeAlignedArrayElements { input: bams = CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments" }
 
-    # PbIndex some key files:
-    call PB.PBIndex as PbIndexPrimaryTranscriptomeAlignedArrayElements {
-        input:
-            bam = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam
-    }
+    # NEW PB INDEXING IS BEING DIFFICULT.  REMOVED FOR NOW.
+#    # PbIndex some key files:
+#    call PB.PBIndex as PbIndexPrimaryTranscriptomeAlignedArrayElements {
+#        input:
+#            bam = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam
+#    }
 
     # Merge the 10x stats:
     if ( ! is_SIRV_data ) {
@@ -752,7 +753,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             files = [
                 MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
                 MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
-                PbIndexPrimaryTranscriptomeAlignedArrayElements.pbindex
+#                PbIndexPrimaryTranscriptomeAlignedArrayElements.pbindex
             ],
             outdir = array_element_dir,
             keyfile = GenerateStaticReport.html_report
