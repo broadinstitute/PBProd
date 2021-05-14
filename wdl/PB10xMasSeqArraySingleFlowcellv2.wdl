@@ -153,7 +153,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             unaligned_bam = reads_bam,
             unaligned_pbi = read_pbi,
             prefix = SM + "_shard",
-            num_shards = 50,
+            num_shards = 300,
     }
 
     scatter (sharded_reads in ShardLongReads.unmapped_shards) {
@@ -379,7 +379,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 unaligned_bam = longbow_passed_reads,
                 unaligned_pbi = longbow_passed_reads_pbi,
                 prefix = SM + "_longbow_all_passed_subshard",
-                num_shards = 20,
+                num_shards = 10,
         }
 
         # Segment our arrays into individual array elements:
