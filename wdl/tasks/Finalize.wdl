@@ -151,7 +151,7 @@ task FinalizeTarGzContents {
         cd tmp
         tar -zxf ~{tar_gz_file}
 
-        gsutil -m cp * ~{gcs_output_dir}
+        gsutil -m cp -r * ~{gcs_output_dir}
     >>>
 
     #########################
