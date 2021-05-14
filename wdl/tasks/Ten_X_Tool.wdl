@@ -2,6 +2,7 @@ version 1.0
 
 import "Utils.wdl" as Utils
 import "PBUtils.wdl" as PB
+import "Structs.wdl"
 
 # TODO: Merge this file and `AnnotateAdapters.wdl`
 
@@ -27,11 +28,7 @@ workflow AnnotateBarcodesAndUMIsWorkflow {
         Int? barcode_length
         Int? umi_length
 
-        Int? boot_disk_size_gb
-        Int? cpu
-        Int? disk_space_gb
-        Int? mem_gb
-        Int? preemptible_attempts
+        RuntimeAttr? runtime_attr_override
     }
 
     parameter_meta {
@@ -50,11 +47,7 @@ workflow AnnotateBarcodesAndUMIsWorkflow {
         barcode_length : "[optional] Length of the barcode region in this library preparation (default: 16)."
         umi_length : "[optional] Length of the UMI region in this library preparation (default: 12)."
 
-        mem_gb : "[optional] Amount of memory to give to the machine running each task in this workflow."
-        preemptible_attempts : "[optional] Number of times to allow each task in this workflow to be preempted."
-        disk_space_gb : "[optional] Amount of storage disk space (in Gb) to give to each machine running each task in this workflow."
-        cpu : "[optional] Number of CPU cores to give to each machine running each task in this workflow."
-        boot_disk_size_gb : "[optional] Amount of boot disk space (in Gb) to give to each machine running each task in this workflow."
+        runtime_attr_override : "[optional] Runtime attributes struct with which to override the docker container runtime.."
     }
 
     call PB.PBIndex as PBIndexSubreadShard { input: bam = bam_file }
@@ -63,6 +56,8 @@ workflow AnnotateBarcodesAndUMIsWorkflow {
             unaligned_bam = bam_file,
             unaligned_pbi = PBIndexSubreadShard.pbindex,
     }
+
+
 
     scatter (reads_file in ShardLongReads.unmapped_shards) {
 
@@ -77,11 +72,7 @@ workflow AnnotateBarcodesAndUMIsWorkflow {
                 poly_t_length = poly_t_length,
                 barcode_length = barcode_length,
                 umi_length = umi_length,
-                boot_disk_size_gb = boot_disk_size_gb,
-                cpu = cpu,
-                disk_space_gb = disk_space_gb,
-                mem_gb = mem_gb,
-                preemptible_attempts = preemptible_attempts,
+                runtime_attr_override = runtime_attr_override
         }
     }
     
@@ -110,11 +101,7 @@ task AnnotateBarcodesAndUMIs {
         Int? barcode_length
         Int? umi_length
 
-        Int? boot_disk_size_gb
-        Int? cpu
-        Int? disk_space_gb
-        Int? mem_gb
-        Int? preemptible_attempts
+        RuntimeAttr? runtime_attr_override
     }
 
     # ------------------------------------------------
@@ -133,15 +120,7 @@ task AnnotateBarcodesAndUMIs {
     Boolean use_ssd = false
 
     # You may have to change the following two parameter values depending on the task requirements
-    Int default_ram_mb = 16 * 1024
-
-    Float reads_size_gb = size(bam_file, "GiB") + size(bam_index, "GiB")
-    Int default_disk_space_gb = ceil((reads_size_gb * 2) + 20)
-
-    Int default_boot_disk_size_gb = 10
-
-    # Mem is in units of GB but our command and memory runtime values are in MB
-    Int machine_mem = if defined(mem_gb) then mem_gb * 1024 else default_ram_mb
+    Int disk_size_gb = ceil(( (size(bam_file, "GiB") + size(bam_index, "GiB")) * 8) + 20)
 
     String timing_output_file = "timingInformation.txt"
 
@@ -183,14 +162,29 @@ task AnnotateBarcodesAndUMIs {
         echo "Elapsed Time: $elapsedTime" >> ~{timing_output_file}
 
     }
-    runtime {
-        docker: "us.gcr.io/broad-dsp-lrma/lr-10x:0.1.13"
-        memory: machine_mem + " MB"
-        disks: "local-disk " + select_first([disk_space_gb, default_disk_space_gb]) + if use_ssd then " SSD" else " HDD"
-        bootDiskSizeGb: select_first([boot_disk_size_gb, default_boot_disk_size_gb])
-        preemptible: 0
-        cpu: select_first([cpu, 1])
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             16,
+        disk_gb:            disk_size_gb,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-10x:0.1.13"
     }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+
+
     output {
       File output_bam        = "${output_name}.bam"
       File barcode_stats     = "${output_name}_barcode_stats.tsv"

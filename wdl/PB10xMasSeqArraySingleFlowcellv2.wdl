@@ -407,6 +407,11 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             }
         }
         if ( ! is_SIRV_data ) {
+
+            RuntimeAttr tenx_annotation_attrs = object {
+                mem_gb: 32
+            }
+
             call TENX.AnnotateBarcodesAndUMIs as TenxAnnotateArrayElements {
                 input:
                     bam_file = MergeArrayElements_1.merged_bam,
@@ -418,7 +423,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     poly_t_length = 31,
                     barcode_length = 16,
                     umi_length = 10,
-                    mem_gb = 32
+                    runtime_attr_override = tenx_annotation_attrs
             }
         }
 
