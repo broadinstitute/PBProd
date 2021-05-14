@@ -25,7 +25,7 @@ task Run_Group {
         RuntimeAttr? runtime_attr_override
     }
 
-    Int disk_size_gb = 10 + 4*ceil(size(aligned_transcriptome_reads, "GB"))
+    Int disk_size_gb = 10 + 20*ceil(size(aligned_transcriptome_reads, "GB") + size(aligned_transcriptome_reads_index, "GB"))
 
     String per_cell_args = if do_per_cell then " --per-cell --cell-tag " + cell_barcode_tag + " " else ""
 
