@@ -60,7 +60,7 @@ task Segment
     }
 
     String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
-    Int disk_size = 4*ceil(size(annotated_reads, "GB"))
+    Int disk_size = 15*ceil(size(annotated_reads, "GB")) + 20
 
     command <<<
         set -euxo pipefail

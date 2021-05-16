@@ -769,7 +769,10 @@ task MergeBams {
     command <<<
         set -euxo pipefail
 
-        samtools merge -p -c -@2 --no-PG ~{prefix}.bam ~{sep=" " bams}
+        # Make sure we use all our proocesors:
+        np=$(cat /proc/cpuinfo | grep ^processor | tail -n1 | awk '{print $NF+1}')
+
+        samtools merge -p -c -@$np --no-PG ~{prefix}.bam ~{sep=" " bams}
         samtools index ~{prefix}.bam
     >>>
 

@@ -461,7 +461,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
                 aligned_bam_file = AlignArrayElements.aligned_bam,
-                tags_to_ignore = []
+                tags_to_ignore = [],
+                mem_gb = 64,  # TODO: Debug for memory redution
         }
 
         # We need to restore the annotations we created with the 10x tool to the aligned reads.
@@ -469,7 +470,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
                 aligned_bam_file = AlignArrayElementsToGenome.aligned_bam,
-                tags_to_ignore = []
+                tags_to_ignore = [],
+                mem_gb = 64,  # TODO: Debug for memory redution
         }
 
         # To properly count our transcripts we must throw away the non-primary and unaligned reads:
@@ -585,7 +587,10 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     File longbow_failed_reads_index = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bai]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bai])
 
     # Merge all CCS bams together for this Subread BAM:
-    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads, prefix = SM + "_array_elements" }
+    RuntimeAttr merge_extra_cpu_attrs = object {
+        cpu_cores: 4
+    }
+    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads, prefix = SM + "_array_elements", runtime_attr_override = merge_extra_cpu_attrs }
     call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
     call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned" }
     call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned" }
