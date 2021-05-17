@@ -475,11 +475,16 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # To properly count our transcripts we must throw away the non-primary and unaligned reads:
+        RuntimeAttr filterReadsAttrs = object {
+            cpu_cores: 4,
+            preemptible_tries: 0
+        }
         call Utils.FilterReadsBySamFlags as RemoveUnmappedAndNonPrimaryReads {
             input:
                 bam = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam,
                 sam_flags = "2308",
-                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly"
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly",
+                runtime_attr_override = filterReadsAttrs
         }
 
         # Filter reads with no UMI tag:
@@ -488,7 +493,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 bam = RemoveUnmappedAndNonPrimaryReads.output_bam,
                 tag = "ZU",
                 value_to_remove = ".",
-                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs"
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs",
+                runtime_attr_override = filterReadsAttrs
         }
 
         # Copy the contig to a tag.
