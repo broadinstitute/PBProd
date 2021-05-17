@@ -240,7 +240,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             call Utils.MergeBams as MergeLongbowPassedReads {
             input:
                 bams = [FilterCCSReads.passed_reads, FilterReclaimableReads.passed_reads],
-                prefix = SM + "_LongbowFilter_Failed_1"
+                prefix = SM + "_LongbowFilter_Failed_1"  # TODO: Fix the name here!!!!!!!!!
             }
             call Utils.MergeBams as MergeLongbowFailedReads {
             input:
@@ -592,9 +592,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     }
     call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads, prefix = SM + "_array_elements", runtime_attr_override = merge_extra_cpu_attrs }
     call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
-    call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned" }
-    call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned" }
-    call Utils.MergeBams as MergePrimaryTranscriptomeAlignedArrayElements { input: bams = CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments" }
+    call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as MergePrimaryTranscriptomeAlignedArrayElements { input: bams = CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments", runtime_attr_override = merge_extra_cpu_attrs }
 
     # NEW PB INDEXING IS BEING DIFFICULT.  REMOVED FOR NOW.
 #    # PbIndex some key files:
