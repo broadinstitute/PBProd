@@ -286,9 +286,9 @@ task RestoreAnnotationstoAlignedBam {
     Int default_ram_mb = 32 * 1024
 
     Float reads_size_gb = size(annotated_bam_file, "GiB") + size(aligned_bam_file, "GiB")
-    Int default_disk_space_gb = ceil((reads_size_gb * 3) + 20)
+    Int default_disk_space_gb = ceil((reads_size_gb * 10) + 20)
 
-    Int default_boot_disk_size_gb = 10
+    Int default_boot_disk_size_gb = 100
 
     # Mem is in units of GB but our command and memory runtime values are in MB
     Int machine_mem = if defined(mem_gb) then mem_gb * 1024 else default_ram_mb
