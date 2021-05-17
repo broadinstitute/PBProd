@@ -17,7 +17,7 @@ task CreateCountMatrixFromAnnotatedBam {
         RuntimeAttr? runtime_attr_override
     }
 
-    Int disk_size_gb = 10 + 4*ceil(size(annotated_transcriptome_bam, "GB"))
+    Int disk_size_gb = 20 + 11*ceil(size(annotated_transcriptome_bam, "GB"))
 
     command <<<
         set -euxo pipefail

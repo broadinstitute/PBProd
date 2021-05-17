@@ -450,11 +450,15 @@ task FilterReadsBySamFlags {
         prefix : "[Optional] Prefix string to name the output file (Default: filtered_reads)."
     }
 
-    Int disk_size = 1 + ceil(2 * size(bam, "GiB"))
+    Int disk_size = 20 + ceil(11 * size(bam, "GiB"))
 
     command <<<
-        samtools view -h -b -F ~{sam_flags} ~{bam} > ~{prefix}.bam
-        samtools index ~{prefix}.bam
+
+        # Make sure we use all our proocesors:
+        np=$(cat /proc/cpuinfo | grep ^processor | tail -n1 | awk '{print $NF+1}')
+
+        samtools view -h -b -F ~{sam_flags} -@$np ~{bam} > ~{prefix}.bam
+        samtools index -@$np ~{prefix}.bam
     >>>
 
     output {
@@ -820,7 +824,7 @@ task FilterReadsWithTagValues {
         prefix: "[default-valued] prefix for output BAM"
     }
 
-    Int disk_size = 4*ceil(size(bam, "GB"))
+    Int disk_size = 20 + 11*ceil(size(bam, "GB"))
 
     command <<<
         set -euxo pipefail
