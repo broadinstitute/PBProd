@@ -738,7 +738,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             ccs_reclaimable_reads             = annotated_ccs_reclaimable_reads,
             ccs_reclaimed_reads               = ccs_reclaimed_reads,
             ccs_rejected_longbow_failed_reads = longbow_failed_ccs_unreclaimable_reads,
-            raw_array_elements                = annotated_array_elements,
+            raw_array_elements                = MergeCbcUmiArrayElements.merged_bam,
 
             zmw_subread_stats_file            = MergeShardedZmwSubreadStats.merged_tsv,
             polymerase_read_lengths_file      = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
