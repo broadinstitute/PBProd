@@ -596,7 +596,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     RuntimeAttr merge_extra_cpu_attrs = object {
         cpu_cores: 4
     }
-    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotated_array_elements, prefix = SM + "_array_elements", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotated_array_elements, prefix = SM + "_array_elements", runtime_attr_override = merge_extra_cpu_attrs }  # TODO: Make prefix: `_annotated_array_elements`
     call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
     call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
     call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned", runtime_attr_override = merge_extra_cpu_attrs }
@@ -715,34 +715,41 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     }
     call JUPYTER.PB10xMasSeqSingleFlowcellReport as GenerateStaticReport {
         input:
-            notebook_template                = jupyter_template_static,
+            notebook_template                 = jupyter_template_static,
 
-            sample_name                      = SM,
+            sample_name                       = SM,
 
-            subreads_stats                   = CalcSamStatsOnInputBam.raw_stats,
-            ccs_reads_stats                  = GenomeAlignedArrayElementMetrics.sam_stats_raw_stats,
-            array_elements_stats             = TranscriptomeAlignedArrayElementMetrics.sam_stats_raw_stats,
-            ccs_report_file                  = final_ccs_report,
+            subreads_stats                    = CalcSamStatsOnInputBam.raw_stats,
+            ccs_reads_stats                   = GenomeAlignedArrayElementMetrics.sam_stats_raw_stats,
+            array_elements_stats              = TranscriptomeAlignedArrayElementMetrics.sam_stats_raw_stats,
+            ccs_report_file                   = final_ccs_report,
 
-            raw_ccs_bam_file                 = ccs_corrected_reads,
-            array_element_bam_file           = MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
-            ccs_rejected_bam_file            = ccs_rejected_reads,
+            raw_ccs_bam_file                  = ccs_corrected_reads,
+            array_element_bam_file            = MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+            ccs_rejected_bam_file             = ccs_rejected_reads,
 
-            annotated_bam_file               = annotated_ccs_reads,
+            annotated_bam_file                = annotated_ccs_reads,
 
-            longbow_passed_reads_file        = longbow_passed_reads,
-            longbow_failed_reads_file        = longbow_failed_reads,
+            longbow_passed_reads_file         = longbow_passed_reads,
+            longbow_failed_reads_file         = longbow_failed_reads,
 
-            zmw_subread_stats_file           = MergeShardedZmwSubreadStats.merged_tsv,
-            polymerase_read_lengths_file     = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
+            longbow_passed_ccs_reads          = longbow_passed_ccs_reads,
+            longbow_failed_ccs_reads          = longbow_failed_ccs_reads,
+            ccs_reclaimable_reads             = annotated_ccs_reclaimable_reads,
+            ccs_reclaimed_reads               = ccs_reclaimed_reads,
+            ccs_rejected_longbow_failed_reads = longbow_failed_ccs_unreclaimable_reads,
+            raw_array_elements                = annotated_array_elements,
 
-            ten_x_metrics_file               = Merge10XStats_1.merged_tsv,
-            is_mas_seq_10_array              = is_mas_seq_10_array,
+            zmw_subread_stats_file            = MergeShardedZmwSubreadStats.merged_tsv,
+            polymerase_read_lengths_file      = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
 
-            workflow_dot_file                = workflow_dot_file,
-            prefix                           = SM + "_MAS-seq_",
+            ten_x_metrics_file                = Merge10XStats_1.merged_tsv,
+            is_mas_seq_10_array               = is_mas_seq_10_array,
 
-            runtime_attr_override            = create_report_runtime_attrs,
+            workflow_dot_file                 = workflow_dot_file,
+            prefix                            = SM + "_MAS-seq_",
+
+            runtime_attr_override             = create_report_runtime_attrs,
     }
 
     ######################################################################

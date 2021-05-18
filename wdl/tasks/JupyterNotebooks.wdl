@@ -29,6 +29,13 @@ task PB10xMasSeqSingleFlowcellReport {
         File longbow_passed_reads_file
         File longbow_failed_reads_file
 
+        File longbow_passed_ccs_reads
+        File longbow_failed_ccs_reads
+        File ccs_reclaimable_reads
+        File ccs_reclaimed_reads
+        File ccs_rejected_longbow_failed_reads
+        File raw_array_elements
+
         File? zmw_subread_stats_file
         File? polymerase_read_lengths_file
         File? approx_raw_subread_array_lengths
@@ -59,8 +66,15 @@ task PB10xMasSeqSingleFlowcellReport {
 
         annotated_bam_file : "Bam file containing ccs corrected reads with annotated sections in the SG tag."
 
-        longbow_passed_reads_file : "Bam file containing ccs corrected reads that passed the longbow filter for the model used in this run."
-        longbow_failed_reads_file : "Bam file containing ccs corrected reads that failed the longbow filter for the model used in this run."
+        longbow_passed_reads_file : "Bam file containing all reads that passed the longbow filter for the model used in this run (both ccs passed and reclaimed)."
+        longbow_failed_reads_file : "Bam file containing alll reads that failed the longbow filter for the model used in this run (both ccs passed and reclaimed)."
+
+        longbow_passed_ccs_reads : "Bam file containing ccs corrected reads that passed the longbow filter for the model used in this run (CCS Corrected reads ONLY)."
+        longbow_failed_ccs_reads : "Bam file containing ccs corrected reads that failed the longbow filter for the model used in this run (CCS Corrected reads ONLY)."
+        ccs_reclaimable_reads : "Bam file containing ccs rejected reads that are deemed to be reclaimable."
+        ccs_reclaimed_reads : "Bam file containing ccs rejected reads that have been reclaimed."
+        ccs_rejected_longbow_failed_reads : "Bam file containing ccs reclaimable reads that did not pass longbow filtering and were not reclaimed."
+        raw_array_elements : "Bam file containing the raw unaligned array elements created from the longbow_passed_reads_file."
 
         zmw_subread_stats_file : "[optional] File containing statistics about the subreads from each ZMW (created by collect_zmw_subread_stats.py in the PBUtils docker container)."
         polymerase_read_lengths_file : "[optional] File containing the lengths of each polymerase read from the sequencer (as created by collect_polymerase_read_lengths.py)"
@@ -142,6 +156,13 @@ task PB10xMasSeqSingleFlowcellReport {
 
         echo "~{longbow_passed_reads_file}" >> mas-seq_qc_inputs.config
         echo "~{longbow_failed_reads_file}" >> mas-seq_qc_inputs.config
+
+        echo "~{longbow_passed_ccs_reads}" >> mas-seq_qc_inputs.config
+        echo "~{longbow_failed_ccs_reads}" >> mas-seq_qc_inputs.config
+        echo "~{ccs_reclaimable_reads}" >> mas-seq_qc_inputs.config
+        echo "~{ccs_reclaimed_reads}" >> mas-seq_qc_inputs.config
+        echo "~{ccs_rejected_longbow_failed_reads}" >> mas-seq_qc_inputs.config
+        echo "~{raw_array_elements}" >> mas-seq_qc_inputs.config
 
         echo "~{zmw_subread_stats_file_name}" >> mas-seq_qc_inputs.config
         echo "~{polymerase_read_lengths_file_name}" >> mas-seq_qc_inputs.config
