@@ -165,6 +165,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
         String fbmrq_prefix = basename(sharded_reads, ".bam")
 
+        # Filter out the kinetics tags from PB files:
+        call PB.RemoveKineticsTags {
+            input:
+                bam = sharded_reads,
+                prefix = SM + "_kinetics_removed"
+        }
+
         if (use_subreads) {
             # Call CCS on the subreads from the sequencer:
             # No preepting because these take long enough that it doesn't seem to save $
@@ -175,7 +182,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             }
             call PB.CCS {
                 input:
-                    subreads = sharded_reads,
+                    subreads = RemoveKineticsTags.bam_file,
                     min_passes = min_ccs_passes,
                     disk_space_scale_factor = 4,
                     runtime_attr_override = ccs_runtime_attrs
@@ -185,7 +192,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             # Get our uncorrected / CCS Rejected reads:
             call PB.ExtractUncorrectedReads {
                 input:
-                    subreads = sharded_reads,
+                    subreads = RemoveKineticsTags.bam_file,
                     consensus = CCS.consensus,
                     prefix = SM + "_ccs_rejected",
                     runtime_attr_override = disable_preemption_runtime_attrs
@@ -257,10 +264,10 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             ###################
             # Get ZMW stats:
-            call PB.PBIndex as PBIndexSubreadShard { input: bam = sharded_reads }
+            call PB.PBIndex as PBIndexSubreadShard { input: bam = RemoveKineticsTags.bam_file }
             call PB.ShardLongReads as SubshardRawSubreads {
                 input:
-                    unaligned_bam = sharded_reads,
+                    unaligned_bam = RemoveKineticsTags.bam_file,
                     unaligned_pbi = PBIndexSubreadShard.pbindex,
                     num_shards = 10,
                     prefix = "subshard"
@@ -291,7 +298,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             # 1 - filter the reads by the minimum read quality:
             call Utils.Bamtools as FilterS2EByMinReadQuality {
                 input:
-                    bamfile = sharded_reads,
+                    bamfile = RemoveKineticsTags.bam_file,
                     prefix = fbmrq_prefix + "_good_reads",
                     cmd = "filter",
                     args = '-tag "rq":">=' + min_read_quality + '"',
@@ -301,7 +308,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             # 1.5 - Get the "rejected" reads:
             call Utils.Bamtools as GetS2ERCcsRejectedReads {
                 input:
-                    bamfile = sharded_reads,
+                    bamfile = RemoveKineticsTags.bam_file,
                     prefix = fbmrq_prefix + "_rejected_reads",
                     cmd = "filter",
                     args = '-tag "rq":"<' + min_read_quality + '"',
@@ -311,7 +318,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             # 2 - Get reads we can reclaim:
             call Utils.Bamtools as ExtractS2ECcsReclaimableReads {
                 input:
-                    bamfile = sharded_reads,
+                    bamfile = RemoveKineticsTags.bam_file,
                     prefix = fbmrq_prefix + "_reads_for_ccs_reclamation",
                     cmd = "filter",
                     args = '-tag "rq":"<' + min_read_quality + '" -length "<=' + max_reclamation_length + '"',
