@@ -430,13 +430,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
         # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
         # output to `File?` instead of `File`
-        File annotatedReads = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
+        File annotated_array_elements = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
 
         # Grab only the coding regions of the annotated reads for our alignments:
         Int extract_start_offset = if is_SIRV_data then 8 else 26
         call LONGBOW.Extract as ExtractCodingRegionsFromArrayElements {
             input:
-                bam = annotatedReads,
+                bam = annotated_array_elements,
                 start_offset = extract_start_offset,
                 prefix = SM + "_ArrayElements_Coding_Regions_Only"
         }
@@ -596,7 +596,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     RuntimeAttr merge_extra_cpu_attrs = object {
         cpu_cores: 4
     }
-    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotatedReads, prefix = SM + "_array_elements", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotated_array_elements, prefix = SM + "_array_elements", runtime_attr_override = merge_extra_cpu_attrs }
     call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
     call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
     call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned", runtime_attr_override = merge_extra_cpu_attrs }
