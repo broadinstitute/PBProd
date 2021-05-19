@@ -261,6 +261,31 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     bam = MergeLongbowPassedReads.merged_bam
             }
 
+            # 9: Get CCS Reclaimed array elements for further study:
+            call PB.PBIndex as PbIndexCcsReclaimedReads {
+                input:
+                    bam = FilterReclaimableReads.passed_reads
+            }
+            call PB.ShardLongReads as ShardCcsReclaimedReads {
+                input:
+                    unaligned_bam = FilterReclaimableReads.passed_reads,
+                    unaligned_pbi = PbIndexCcsReclaimedReads.pbindex,
+                    prefix = SM + "_ccs_reclaimed_reads_subshard",
+                    num_shards = 10,
+            }
+            scatter (ccs_reclaimed_shard in ShardCcsReclaimedReads.unmapped_shards) {
+                call LONGBOW.Segment as SegmentCcsReclaimedReads {
+                    input:
+                        annotated_reads = ccs_reclaimed_shard,
+                        prefix = SM + "_ccs_reclaimed_array_elements_subshard",
+                        is_mas_seq_10_array = is_mas_seq_10_array
+                }
+            }
+            call Utils.MergeBams as MergeCcsReclaimedArrayElementSubshards {
+            input:
+                bams = SegmentCcsReclaimedReads.segmented_bam,
+                prefix = SM + "_ccs_reclaimed_array_elements_shard"
+            }
 
             ###################
             # Get ZMW stats:
@@ -375,6 +400,32 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             call PB.PBIndex as PbIndexS2ELongbowPassedReads {
                 input:
                     bam = MergeLongbowS2EPassedReads.merged_bam
+            }
+
+            # 9: Get CCS Reclaimed array elements for further study:
+            call PB.PBIndex as PbIndexS2ECcsReclaimedReads {
+                input:
+                    bam = FilterS2EReclaimableReads.passed_reads
+            }
+            call PB.ShardLongReads as ShardS2ECcsReclaimedReads {
+                input:
+                    unaligned_bam = FilterS2EReclaimableReads.passed_reads,
+                    unaligned_pbi = PbIndexS2ECcsReclaimedReads.pbindex,
+                    prefix = SM + "_ccs_reclaimed_reads_subshard",
+                    num_shards = 10,
+            }
+            scatter (s2e_ccs_reclaimed_shard in ShardS2ECcsReclaimedReads.unmapped_shards) {
+                call LONGBOW.Segment as SegmentS2ECcsReclaimedReads {
+                    input:
+                        annotated_reads = s2e_ccs_reclaimed_shard,
+                        prefix = SM + "_ccs_reclaimed_array_elements_subshard",
+                        is_mas_seq_10_array = is_mas_seq_10_array
+                }
+            }
+            call Utils.MergeBams as MergeS2ECcsReclaimedArrayElementSubshards {
+            input:
+                bams = SegmentS2ECcsReclaimedReads.segmented_bam,
+                prefix = SM + "_ccs_reclaimed_array_elements_shard"
             }
         }
 
@@ -552,6 +603,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 tsv_files = select_all(MergeMicroShardedZmwSubreadStats.merged_tsv),
                 prefix = SM + "_zmw_subread_stats"
         }
+
+        # Merge CCS Reclaimed Array elements:
+        call Utils.MergeBams as MergeCCSReclaimedArrayElements { input: bams = select_all(MergeCcsReclaimedArrayElementSubshards.merged_bam), prefix = SM + "_ccs_reclaimed_array_elements"  }
     }
     if (!use_subreads) {
         # Sequel IIe Data.
@@ -571,6 +625,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         # All Longbow Passed / Failed reads:
         call Utils.MergeBams as MergeAllLongbowPassedReads_S2e { input: bams = select_all(MergeLongbowS2EPassedReads.merged_bam), prefix = SM + "_all_longbow_passed" }
         call Utils.MergeBams as MergeAllLongbowFailedReads_S2e { input: bams = select_all(MergeLongbowS2EFailedReads.merged_bam), prefix = SM + "_all_longbow_failed" }
+
+        # Merge CCS Reclaimed Array elements:
+        call Utils.MergeBams as MergeCCSReclaimedArrayElements_S2e { input: bams = select_all(MergeS2ECcsReclaimedArrayElementSubshards.merged_bam), prefix = SM + "_ccs_reclaimed_array_elements"  }
     }
 
     # Alias out the data we need to pass into stuff later:
@@ -599,14 +656,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     File longbow_failed_reads = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bam]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bam])
     File longbow_failed_reads_index = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bai]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bai])
 
-    # TODO: Move this up!
-    # Get the array elements from ONLY reclaimed reads:
-    call LONGBOW.Segment as SegmentCcsReclaimedReads {
-        input:
-            annotated_reads = ccs_reclaimed_reads,
-            prefix = SM + "_ccs_reclaimed_array_elements",
-            is_mas_seq_10_array = is_mas_seq_10_array
-    }
+    File ccs_reclaimed_array_elements = if (use_subreads) then select_first([MergeCCSReclaimedArrayElements.merged_bai]) else select_first([MergeCCSReclaimedArrayElements_S2e.merged_bai])
 
     # Merge all CCS bams together for this Subread BAM:
     RuntimeAttr merge_extra_cpu_attrs = object {
@@ -755,7 +805,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             ccs_reclaimed_reads               = ccs_reclaimed_reads,
             ccs_rejected_longbow_failed_reads = longbow_failed_ccs_unreclaimable_reads,
             raw_array_elements                = MergeCbcUmiArrayElements.merged_bam,
-            ccs_reclaimed_array_elements      = SegmentCcsReclaimedReads.segmented_bam,
+            ccs_reclaimed_array_elements      = ccs_reclaimed_array_elements,
 
             zmw_subread_stats_file            = MergeShardedZmwSubreadStats.merged_tsv,
             polymerase_read_lengths_file      = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
