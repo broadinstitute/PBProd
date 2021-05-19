@@ -656,7 +656,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     File longbow_failed_reads = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bam]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bam])
     File longbow_failed_reads_index = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bai]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bai])
 
-    File ccs_reclaimed_array_elements = if (use_subreads) then select_first([MergeCCSReclaimedArrayElements.merged_bai]) else select_first([MergeCCSReclaimedArrayElements_S2e.merged_bai])
+    File ccs_reclaimed_array_elements = if (use_subreads) then select_first([MergeCCSReclaimedArrayElements.merged_bam]) else select_first([MergeCCSReclaimedArrayElements_S2e.merged_bam])
+    File ccs_reclaimed_array_elements_index = if (use_subreads) then select_first([MergeCCSReclaimedArrayElements.merged_bai]) else select_first([MergeCCSReclaimedArrayElements_S2e.merged_bai])
 
     # Merge all CCS bams together for this Subread BAM:
     RuntimeAttr merge_extra_cpu_attrs = object {
@@ -806,6 +807,17 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             ccs_rejected_longbow_failed_reads = longbow_failed_ccs_unreclaimable_reads,
             raw_array_elements                = MergeCbcUmiArrayElements.merged_bam,
             ccs_reclaimed_array_elements      = ccs_reclaimed_array_elements,
+
+#            # Need to pass indices as well so we can easily get counts out of them:
+#            raw_ccs_bam_file_idx                  = ccs_corrected_reads_index,
+#            ccs_rejected_bam_file_idx             = ccs_rejected_reads_index,
+#            longbow_passed_reads_file_idx         = longbow_passed_reads_index,
+#            longbow_failed_reads_file_idx         = longbow_failed_reads_index,
+#            ccs_reclaimable_reads_idx             = annotated_ccs_reclaimable_reads_index,
+#            ccs_reclaimed_reads_idx               = ccs_reclaimed_reads_index,
+#            ccs_rejected_longbow_failed_reads_idx = longbow_failed_ccs_unreclaimable_reads_index,
+#            raw_array_elements_idx                = MergeCbcUmiArrayElements.merged_bai,
+#            ccs_reclaimed_array_elements_idx      = ccs_reclaimed_array_elements_index,
 
             zmw_subread_stats_file            = MergeShardedZmwSubreadStats.merged_tsv,
             polymerase_read_lengths_file      = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
