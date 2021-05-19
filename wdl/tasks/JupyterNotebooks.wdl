@@ -22,7 +22,7 @@ task PB10xMasSeqSingleFlowcellReport {
 
         File raw_ccs_bam_file
         File array_element_bam_file
-        File? ccs_rejected_bam_file
+        File ccs_rejected_bam_file
 
         File annotated_bam_file
 
@@ -62,7 +62,7 @@ task PB10xMasSeqSingleFlowcellReport {
         raw_ccs_bam_file : "Unaligned reads file in BAM format from the CCS process (pre-array splitting)."
 
         array_element_bam_file : "Aligned reads file in BAM format containing aligned MASSeq array elements as individual reads."
-        ccs_rejected_bam_file : "[optional] Bam file containing all subreads from zmws that were rejected by CCS."
+        ccs_rejected_bam_file : "Bam file containing all subreads from zmws that were rejected by CCS."
 
         annotated_bam_file : "Bam file containing ccs corrected reads with annotated sections in the SG tag."
 
@@ -110,11 +110,10 @@ task PB10xMasSeqSingleFlowcellReport {
         ))
 
     # Handle the optional files:
-    String ten_x_metrics_file_name = if defined(ten_x_metrics_file) then ten_x_metrics_file else "NON-EXISTENT-PLACEHOLDER"
-    String ccs_rejected_bam_file_name = if defined(ccs_rejected_bam_file) then ccs_rejected_bam_file else "NON-EXISTENT-PLACEHOLDER"
-    String zmw_subread_stats_file_name = if defined(zmw_subread_stats_file) then zmw_subread_stats_file else "NON-EXISTENT-PLACEHOLDER"
-    String polymerase_read_lengths_file_name = if defined(polymerase_read_lengths_file) then polymerase_read_lengths_file else "NON-EXISTENT-PLACEHOLDER"
-    String approx_raw_subread_array_lengths_name = if defined(approx_raw_subread_array_lengths) then approx_raw_subread_array_lengths else "NON-EXISTENT-PLACEHOLDER"
+    String ten_x_metrics_file_flag = if defined(ten_x_metrics_file) then "true" else "false"
+    String zmw_subread_stats_file_flag = if defined(zmw_subread_stats_file) then "true" else "false"
+    String polymerase_read_lengths_file_flag = if defined(polymerase_read_lengths_file) then "true" else "false"
+    String approx_raw_subread_array_lengths_flag = if defined(approx_raw_subread_array_lengths) then "true" else "false"
 
     String is_mas_seq_10_array_arg = if is_mas_seq_10_array then "True" else "False"
 
@@ -150,7 +149,7 @@ task PB10xMasSeqSingleFlowcellReport {
 
         echo "~{raw_ccs_bam_file}" >> mas-seq_qc_inputs.config
         echo "~{array_element_bam_file}" >> mas-seq_qc_inputs.config
-        echo "~{ccs_rejected_bam_file_name}" >> mas-seq_qc_inputs.config
+        echo "~{ccs_rejected_bam_file}" >> mas-seq_qc_inputs.config
 
         echo "~{annotated_bam_file}" >> mas-seq_qc_inputs.config
 
@@ -164,11 +163,27 @@ task PB10xMasSeqSingleFlowcellReport {
         echo "~{ccs_rejected_longbow_failed_reads}" >> mas-seq_qc_inputs.config
         echo "~{raw_array_elements}" >> mas-seq_qc_inputs.config
 
-        echo "~{zmw_subread_stats_file_name}" >> mas-seq_qc_inputs.config
-        echo "~{polymerase_read_lengths_file_name}" >> mas-seq_qc_inputs.config
-        echo "~{approx_raw_subread_array_lengths_name}" >> mas-seq_qc_inputs.config
+        if ~{zmw_subread_stats_file_flag} ; then
+            echo "~{zmw_subread_stats_file}" >> mas-seq_qc_inputs.config
+        else
+            echo "NON-EXISTENT-PLACEHOLDER" >> mas-seq_qc_inputs.config
+        fi
+        if ~{polymerase_read_lengths_file_flag} ; then
+            echo "~{polymerase_read_lengths_file}" >> mas-seq_qc_inputs.config
+        else
+            echo "NON-EXISTENT-PLACEHOLDER" >> mas-seq_qc_inputs.config
+        fi
+        if ~{approx_raw_subread_array_lengths_flag} ; then
+            echo "~{approx_raw_subread_array_lengths}" >> mas-seq_qc_inputs.config
+        else
+            echo "NON-EXISTENT-PLACEHOLDER" >> mas-seq_qc_inputs.config
+        fi
 
-        echo "~{ten_x_metrics_file_name}" >> mas-seq_qc_inputs.config
+        if ~{ten_x_metrics_file_flag} ; then
+            echo "~{ten_x_metrics_file}" >> mas-seq_qc_inputs.config
+        else
+            echo "NON-EXISTENT-PLACEHOLDER" >> mas-seq_qc_inputs.config
+        fi
         echo "~{is_mas_seq_10_array_arg}" >> mas-seq_qc_inputs.config
 
         echo "~{workflow_dot_file}" >> mas-seq_qc_inputs.config
