@@ -35,6 +35,7 @@ task PB10xMasSeqSingleFlowcellReport {
         File ccs_reclaimed_reads
         File ccs_rejected_longbow_failed_reads
         File raw_array_elements
+        File ccs_reclaimed_array_elements
 
         File? zmw_subread_stats_file
         File? polymerase_read_lengths_file
@@ -75,6 +76,7 @@ task PB10xMasSeqSingleFlowcellReport {
         ccs_reclaimed_reads : "Bam file containing ccs rejected reads that have been reclaimed."
         ccs_rejected_longbow_failed_reads : "Bam file containing ccs reclaimable reads that did not pass longbow filtering and were not reclaimed."
         raw_array_elements : "Bam file containing the raw unaligned array elements created from the longbow_passed_reads_file."
+        ccs_reclaimed_array_elements : "Bam file containing the unaligned array elements created from reclaimed CCS reads."
 
         zmw_subread_stats_file : "[optional] File containing statistics about the subreads from each ZMW (created by collect_zmw_subread_stats.py in the PBUtils docker container)."
         polymerase_read_lengths_file : "[optional] File containing the lengths of each polymerase read from the sequencer (as created by collect_polymerase_read_lengths.py)"
@@ -162,6 +164,7 @@ task PB10xMasSeqSingleFlowcellReport {
         echo "~{ccs_reclaimed_reads}" >> mas-seq_qc_inputs.config
         echo "~{ccs_rejected_longbow_failed_reads}" >> mas-seq_qc_inputs.config
         echo "~{raw_array_elements}" >> mas-seq_qc_inputs.config
+        echo "~{ccs_reclaimed_array_elements}" >> mas-seq_qc_inputs.config
 
         if ~{zmw_subread_stats_file_flag} ; then
             echo "~{zmw_subread_stats_file}" >> mas-seq_qc_inputs.config

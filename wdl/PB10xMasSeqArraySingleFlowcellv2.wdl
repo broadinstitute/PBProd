@@ -599,6 +599,15 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     File longbow_failed_reads = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bam]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bam])
     File longbow_failed_reads_index = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bai]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bai])
 
+    # TODO: Move this up!
+    # Get the array elements from ONLY reclaimed reads:
+    call LONGBOW.Segment as SegmentCcsReclaimedReads {
+        input:
+            annotated_reads = ccs_reclaimed_reads,
+            prefix = SM + "_ccs_reclaimed_array_elements",
+            is_mas_seq_10_array = is_mas_seq_10_array
+    }
+
     # Merge all CCS bams together for this Subread BAM:
     RuntimeAttr merge_extra_cpu_attrs = object {
         cpu_cores: 4
@@ -746,6 +755,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             ccs_reclaimed_reads               = ccs_reclaimed_reads,
             ccs_rejected_longbow_failed_reads = longbow_failed_ccs_unreclaimable_reads,
             raw_array_elements                = MergeCbcUmiArrayElements.merged_bam,
+            ccs_reclaimed_array_elements      = SegmentCcsReclaimedReads.segmented_bam,
 
             zmw_subread_stats_file            = MergeShardedZmwSubreadStats.merged_tsv,
             polymerase_read_lengths_file      = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
