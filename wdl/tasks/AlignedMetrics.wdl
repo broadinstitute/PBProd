@@ -852,7 +852,10 @@ task SamtoolsStats {
     String gc_depth_file = "gc_depth_stats.txt"
 
     command <<<
-        samtools stats ~{bam} > ~{raw_stats_file}
+        # Make sure we use all our proocesors:
+        np=$(cat /proc/cpuinfo | grep ^processor | tail -n1 | awk '{print $NF+1}')
+
+        samtools stats -@$np ~{bam} > ~{raw_stats_file}
         grep ^SN ~{raw_stats_file} | cut -f 2-  > ~{summary_stats_file}
         grep ^FFQ ~{raw_stats_file} | cut -f 2- > ~{first_frag_qual_file}
         grep ^LFQ ~{raw_stats_file} | cut -f 2- > ~{last_frag_qual_file}
@@ -886,8 +889,8 @@ task SamtoolsStats {
 
     #########################
     RuntimeAttr default_attr = object {
-        cpu_cores:          1,
-        mem_gb:             1,
+        cpu_cores:          2,
+        mem_gb:             8,
         disk_gb:            disk_size,
         boot_disk_gb:       10,
         preemptible_tries:  2,
