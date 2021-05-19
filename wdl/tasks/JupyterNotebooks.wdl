@@ -214,10 +214,10 @@ task PB10xMasSeqSingleFlowcellReport {
         # Do the conversion:
 
         # Run the notebook and populate the notebook itself:
-        jupyter nbconvert --execute ~{nb_name} --to notebook --inplace --no-prompt --no-input --clear-output --debug --ExecutePreprocessor.timeout=3600
+        jupyter nbconvert --execute ~{nb_name} --to notebook --inplace --no-prompt --no-input --clear-output --debug --ExecutePreprocessor.timeout=None
 
         # Convert the notebook output we created just above here to the HTML report:
-        jupyter nbconvert ~{nb_name} --to html --no-prompt --no-input --debug --ExecutePreprocessor.timeout=3600
+        jupyter nbconvert ~{nb_name} --to html --no-prompt --no-input --debug --ExecutePreprocessor.timeout=None
 
         # Create a tar.gz of the figures directory:
         tar -zcf figures.tar.gz figures
