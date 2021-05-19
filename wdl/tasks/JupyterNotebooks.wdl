@@ -142,6 +142,17 @@ task PB10xMasSeqSingleFlowcellReport {
     command <<<
         set -euxo pipefail
 
+        # Set up memory logging daemon:
+        MEM_LOG_INTERVAL_s=5
+        DO_MEMORY_LOG=true
+        while $DO_MEMORY_LOG ; do
+            date
+            date +%s
+            cat /proc/meminfo
+            sleep $MEM_LOG_INTERVAL_s
+        done >> memory_log.txt &
+        mem_pid=$!
+
         # Copy the notebook template to our current folder:
         cp ~{notebook_template} ~{nb_name}
 
@@ -221,6 +232,15 @@ task PB10xMasSeqSingleFlowcellReport {
 
         # Create a tar.gz of the figures directory:
         tar -zcf figures.tar.gz figures
+
+        # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
+        set +e
+        DO_MEMORY_LOG=false
+        sleep $(($MEM_LOG_INTERVAL_s  * 2))
+        kill -0 $mem_pid &> /dev/null
+        if [ $? -ne 0 ] ; then
+            kill -9 $mem_pid
+        fi
     >>>
 
     output {
