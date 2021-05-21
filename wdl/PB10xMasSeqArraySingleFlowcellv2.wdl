@@ -793,6 +793,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             raw_ccs_bam_file                  = ccs_corrected_reads,
             array_element_bam_file            = MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+            array_elements_genome_aligned     = MergeGenomeAlignedExtractedArrayElements.merged_bam,
             ccs_rejected_bam_file             = ccs_rejected_reads,
 
             annotated_bam_file                = annotated_ccs_reads,

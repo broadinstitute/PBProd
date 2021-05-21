@@ -22,6 +22,7 @@ task PB10xMasSeqSingleFlowcellReport {
 
         File raw_ccs_bam_file
         File array_element_bam_file
+        File array_elements_genome_aligned
         File ccs_rejected_bam_file
 
         File annotated_bam_file
@@ -72,7 +73,8 @@ task PB10xMasSeqSingleFlowcellReport {
         ccs_report_file : "CCS report file from the CCS run for the data from the PacBio instrument."
         raw_ccs_bam_file : "Unaligned reads file in BAM format from the CCS process (pre-array splitting)."
 
-        array_element_bam_file : "Aligned reads file in BAM format containing aligned MASSeq array elements as individual reads."
+        array_element_bam_file : "Transcriptome aligned reads file in BAM format containing aligned MASSeq array elements as individual reads."
+        array_elements_genome_aligned : "Genome aligned reads file in BAM format containing aligned MASSeq array elements as individual reads."
         ccs_rejected_bam_file : "Bam file containing all subreads from zmws that were rejected by CCS."
 
         annotated_bam_file : "Bam file containing ccs corrected reads with annotated sections in the SG tag."
@@ -182,6 +184,7 @@ task PB10xMasSeqSingleFlowcellReport {
 
         echo "~{raw_ccs_bam_file}" >> mas-seq_qc_inputs.config
         echo "~{array_element_bam_file}" >> mas-seq_qc_inputs.config
+        echo "~{array_elements_genome_aligned}" >> mas-seq_qc_inputs.config
         echo "~{ccs_rejected_bam_file}" >> mas-seq_qc_inputs.config
 
         echo "~{annotated_bam_file}" >> mas-seq_qc_inputs.config
