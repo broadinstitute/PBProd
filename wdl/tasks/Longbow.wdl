@@ -6,13 +6,11 @@ task Annotate
 {
     input {
         File reads
-        Boolean is_mas_seq_10_array = false
+        String model = "mas15"
         String prefix = "longbow_annotated"
 
         RuntimeAttr? runtime_attr_override
     }
-
-    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
 
     Int disk_size = 4*ceil(size(reads, "GB"))
 
@@ -20,7 +18,7 @@ task Annotate
         set -euxo pipefail
 
         source /longbow/venv/bin/activate
-        longbow annotate -t8 -v INFO ~{reads} ~{model_spec_arg} -o ~{prefix}.bam
+        longbow annotate -t8 --model ~{model} -v INFO ~{reads} -o ~{prefix}.bam
     >>>
 
     output {
@@ -35,7 +33,7 @@ task Annotate
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.3.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -53,20 +51,19 @@ task Segment
 {
     input {
         File annotated_reads
-        Boolean is_mas_seq_10_array = false
+        String model = "mas15"
         String prefix = "longbow_segmented"
 
         RuntimeAttr? runtime_attr_override
     }
 
-    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
     Int disk_size = 15*ceil(size(annotated_reads, "GB")) + 20
 
     command <<<
         set -euxo pipefail
 
         source /longbow/venv/bin/activate
-        longbow segment -v INFO -s ~{annotated_reads} ~{model_spec_arg} -o ~{prefix}.bam
+        longbow segment --model ~{model} -v INFO -s ~{annotated_reads} -o ~{prefix}.bam
     >>>
 
     output {
@@ -81,7 +78,7 @@ task Segment
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.3.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -99,7 +96,7 @@ task ScSplit
 {
     input {
         File reads_bam
-        Boolean is_mas_seq_10_array = false
+        String model = "mas15"
 
         String force_option = ""
 
@@ -111,8 +108,6 @@ task ScSplit
         RuntimeAttr? runtime_attr_override
     }
 
-    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
-
     # On average bam compression is 10x and we have more data on output than that:
     Int disk_size = 15*ceil(size(reads_bam, "GB"))
 
@@ -120,7 +115,7 @@ task ScSplit
         set -euxo pipefail
 
         source /longbow/venv/bin/activate
-        longbow scsplit -t4 -v INFO ~{model_spec_arg} -b ~{force_option} -o ~{prefix} -u ~{umi_length} -c ~{cbc_dummy} ~{reads_bam}
+        longbow scsplit -t4 -v INFO --model ~{model} -b ~{force_option} -o ~{prefix} -u ~{umi_length} -c ~{cbc_dummy} ~{reads_bam}
     >>>
 
     output {
@@ -138,7 +133,7 @@ task ScSplit
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.3.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -160,20 +155,19 @@ task Inspect
 
         File read_names
 
-        Boolean is_mas_seq_10_array = false
+        String model = "mas15"
         String prefix = "longbow_inspected_reads"
 
         RuntimeAttr? runtime_attr_override
     }
 
-    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
     Int disk_size = 4*ceil(size(reads, "GB")) + size(reads_pbi, "GB") + size(read_names, "GB")
 
     command <<<
         set -euxo pipefail
 
         source /longbow/venv/bin/activate
-        longbow inspect ~{model_spec_arg} ~{reads} -p ~{reads_pbi} -r ~{read_names} -o ~{prefix}
+        longbow inspect --model ~{model} ~{reads} -p ~{reads_pbi} -r ~{read_names} -o ~{prefix}
         tar -zxf ~{prefix}.tar.gz ~{prefix}
     >>>
 
@@ -189,7 +183,7 @@ task Inspect
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.3.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -243,7 +237,7 @@ task Demultiplex
         boot_disk_gb:       10,
         preemptible_tries:  0,             # This shouldn't take very long, but it's nice to have things done quickly, so no preemption here.
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.3.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -304,9 +298,10 @@ task CheckForAnnotatedArrayReads {
 task Filter {
     input {
         File bam
+        String model = "mas15"
 
         String prefix = "reads"
-        Boolean is_mas_seq_10_array = false
+
 
         File? bam_pbi
 
@@ -314,7 +309,6 @@ task Filter {
     }
 
     String pbi_arg = if defined(bam_pbi) then " --pbi " else ""
-    String model_spec_arg = if is_mas_seq_10_array then " --m10 " else ""
     Int disk_size = ceil(4*ceil(size(bam, "GB")) + size(bam_pbi, "GB"))
 
     command <<<
@@ -324,7 +318,7 @@ task Filter {
         longbow filter \
             -v INFO \
             ~{pbi_arg}~{default="" sep=" --pbi " bam_pbi} \
-            ~{model_spec_arg} \
+            --model ~{model} \
             ~{bam} \
             -o ~{prefix} 2> >(tee longbow_filter_log.txt >&2) # Get log data from stderr and reprint to stderr
     >>>
@@ -343,7 +337,7 @@ task Filter {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.3.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {
@@ -405,7 +399,7 @@ task Extract {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.2.2"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-longbow:0.3.0"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {

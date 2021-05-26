@@ -59,7 +59,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         Int max_reclamation_length = 60000
 
         Boolean is_SIRV_data = false
-        Boolean is_mas_seq_10_array = false
+        String mas_seq_model = "mas15"
 
         String? sample_name
     }
@@ -93,7 +93,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         max_reclamation_length : "[optional] Maximum length (in bases) that a read can be to attempt to reclaim from CCS rejection (Default: 60000)."
 
         is_SIRV_data : "[optional] true if and only if the data in this sample are from the SIRV library prep.  false otherwise (Default: false)"
-        is_mas_seq_10_array : "[optional] true if and only if the data in this sample were created using the 10 array element MAS-seq library prep.  false otherwise (Default: false)"
+        mas_seq_model : "[optional] built-in mas-seq model to use (Default: mas15)"
 
         sample_name : "[optional] The name of the sample to associate with the data in this workflow."
     }
@@ -214,13 +214,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 call LONGBOW.Annotate as AnnotateCCSReads {
                     input:
                         reads = CCS.consensus,
-                        is_mas_seq_10_array = is_mas_seq_10_array
+                        model = mas_seq_model
                 }
                 # 4: Longbow annotate reclaimable reads
                 call LONGBOW.Annotate as AnnotateReclaimableReads {
                     input:
                         reads = ExtractCcsReclaimableReads.bam_out,
-                        is_mas_seq_10_array = is_mas_seq_10_array
+                        model = mas_seq_model
                 }
             }
 
@@ -232,7 +232,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 input:
                     bam = annotated_ccs_file,
                     prefix = SM + "_subshard",
-                    is_mas_seq_10_array = is_mas_seq_10_array
+                    model = mas_seq_model
             }
 
             # 6: Longbow filter ccs reclaimable reads
@@ -240,7 +240,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 input:
                     bam = annotated_reclaimable_file,
                     prefix = SM + "_subshard",
-                    is_mas_seq_10_array = is_mas_seq_10_array
+                    model = mas_seq_model
             }
 
             # 7: Merge reclaimed and ccs longbow filtered reads
@@ -278,7 +278,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     input:
                         annotated_reads = ccs_reclaimed_shard,
                         prefix = SM + "_ccs_reclaimed_array_elements_subshard",
-                        is_mas_seq_10_array = is_mas_seq_10_array
+                        model = mas_seq_model
                 }
             }
             call Utils.MergeBams as MergeCcsReclaimedArrayElementSubshards {
@@ -355,13 +355,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 call LONGBOW.Annotate as AnnotateS2ECCSReads {
                     input:
                         reads = FilterS2EByMinReadQuality.bam_out,
-                        is_mas_seq_10_array = is_mas_seq_10_array
+                        model = mas_seq_model
                 }
                 # 4: Longbow annotate reclaimable reads
                 call LONGBOW.Annotate as AnnotateS2EReclaimableReads {
                     input:
                         reads = ExtractS2ECcsReclaimableReads.bam_out,
-                        is_mas_seq_10_array = is_mas_seq_10_array
+                        model = mas_seq_model
                 }
             }
 
@@ -373,7 +373,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 input:
                     bam = annotated_S2E_ccs_file,
                     prefix = SM + "_subshard",
-                    is_mas_seq_10_array = is_mas_seq_10_array
+                    model = mas_seq_model
             }
 
             # 6: Longbow filter ccs reclaimable reads
@@ -381,7 +381,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 input:
                     bam = annotated_S2E_reclaimable_file,
                     prefix = SM + "_subshard",
-                    is_mas_seq_10_array = is_mas_seq_10_array
+                    model = mas_seq_model
             }
 
             # 7: Merge reclaimed and ccs longbow filtered reads
@@ -419,7 +419,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     input:
                         annotated_reads = s2e_ccs_reclaimed_shard,
                         prefix = SM + "_ccs_reclaimed_array_elements_subshard",
-                        is_mas_seq_10_array = is_mas_seq_10_array
+                        model = mas_seq_model
                 }
             }
             call Utils.MergeBams as MergeS2ECcsReclaimedArrayElementSubshards {
@@ -445,7 +445,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             call LONGBOW.Segment as SegmentAnnotatedReads {
                 input:
                     annotated_reads = corrected_shard,
-                    is_mas_seq_10_array = is_mas_seq_10_array
+                    model = mas_seq_model
             }
         }
 
@@ -824,7 +824,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             polymerase_read_lengths_file      = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
 
             ten_x_metrics_file                = Merge10XStats_1.merged_tsv,
-            is_mas_seq_10_array               = is_mas_seq_10_array,
+            mas_seq_model                     = mas_seq_model,
 
             workflow_dot_file                 = workflow_dot_file,
             prefix                            = SM + "_MAS-seq_",
