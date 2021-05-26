@@ -2,6 +2,49 @@ version 1.0
 
 import "Structs.wdl"
 
+workflow AlignReads {
+    meta {
+        description : "This workflow aligns reads using minimap2."
+        author : "Jonn Smith"
+        email : "jonn@broadinstitute.org"
+    }
+    input {
+        Array[File] reads
+        File ref_fasta
+
+        String map_preset
+
+        String RG = ""
+
+        String prefix = "out"
+        RuntimeAttr? runtime_attr_override
+    }
+
+    parameter_meta {
+        reads:      "query sequences to be mapped and aligned"
+        ref_fasta:  "reference fasta"
+        RG:         "[optional] read group information to be supplied to parameter '-R' (note that tabs should be input as '\t')"
+        map_preset: "preset to be used for minimap2 parameter '-x'"
+        prefix:     "[default-valued] prefix for output BAM"
+    }
+
+    # Call our alignment task:
+    call Minimap2 {
+        input:
+            reads = reads,
+            ref_fasta = ref_fasta,
+            map_preset = map_preset,
+            RG = RG,
+            prefix = prefix,
+            runtime_attr_override = runtime_attr_override
+    }
+
+    output {
+        File aligned_bam = Minimap2.aligned_bam
+        File aligned_bai = Minimap2.aligned_bai
+    }
+}
+
 # A wrapper to minimap2 for mapping & aligning (groups of) sequences to a reference
 task Minimap2 {
     input {
