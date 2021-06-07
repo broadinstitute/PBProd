@@ -104,6 +104,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     String outdir = sub(gcs_out_root_dir, "/$", "")
 
     call PB.FindBams { input: gcs_input_dir = gcs_input_dir }
+    call PB.FindZmwStatsJsonGz { input: gcs_input_dir = gcs_input_dir }
 
     # Check here if we found ccs bams or subread bams:
     Boolean use_subreads = FindBams.has_subreads
@@ -386,14 +387,14 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             # 7: Merge reclaimed and ccs longbow filtered reads
             call Utils.MergeBams as MergeLongbowS2EPassedReads {
-            input:
-                bams = [FilterS2ECCSReads.passed_reads, FilterS2EReclaimableReads.passed_reads],
-                prefix = SM + "_LongbowFilter_Failed_1"
+                input:
+                    bams = [FilterS2ECCSReads.passed_reads, FilterS2EReclaimableReads.passed_reads],
+                    prefix = SM + "_LongbowFilter_Failed_1"
             }
             call Utils.MergeBams as MergeLongbowS2EFailedReads {
-            input:
-                bams = [FilterS2ECCSReads.failed_reads, FilterS2EReclaimableReads.failed_reads],
-                prefix = SM + "_LongbowFilter_Failed_1"
+                input:
+                    bams = [FilterS2ECCSReads.failed_reads, FilterS2EReclaimableReads.failed_reads],
+                    prefix = SM + "_LongbowFilter_Failed_1"
             }
 
             # 8: PBIndex reads
