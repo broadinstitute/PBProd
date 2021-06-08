@@ -17,11 +17,10 @@ workflow PB10xMasSeqArrayPreProcessing {
         String gcs_input_dir
         String gcs_out_root_dir = "gs://broad-dsde-methods-long-reads-outgoing/PB10xMasSeqArrayPreProcessing"
 
-        # Default here is 0 because ccs uncorrected reads all seem to have RQ = -1.
-        # All pathologically long reads also have RQ = -1.
-        # This way we preserve the vast majority of the data, even if it has low quality.
-        # We can filter it out at later steps.
-        Float min_read_quality = 0.0
+        # Maximum polymerase read length for reads to be included in the output files from the data being processed.
+        # Used here so that the CCS reclamation process can still run in the following workflows, but so the data will
+        # be small enough to run through Longbow in a reasonable amount of time.
+        Int max_read_length = 60000
 
         String? sample_name
     }
@@ -30,10 +29,13 @@ workflow PB10xMasSeqArrayPreProcessing {
         gcs_input_dir : "Input folder on GCS in which to search for BAM files to process."
         gcs_out_root_dir : "Root output GCS folder in which to place results of this workflow."
 
-        min_read_quality : "[optional] Min quality necessary to include a read.  Sequel IIe CCS uncorrected reads all seem to have RQ = -1.  All pathologically long reads also seem to have RQ = -1 (this makes sense given that the pathologically long reads I've seen are all reads that failed CCS).  (default: 0.0)."
+        max_read_length : "[optional] Maximum polymerase read length for reads to be included in the output files from the data being processed.  Used here so that the CCS reclamation process can still run in the following workflows, but so the data will be small enough to run through Longbow in a reasonable amount of time.  (default: 60000)."
 
         sample_name : "[optional] The name of the sample to associate with the data in this workflow."
     }
+
+    # Version of this workflow.
+    String VERSION = "0.2"
 
     # Create an object to disable preemption.  This should only be used for testing.
     RuntimeAttr disable_preemption = object {
@@ -75,22 +77,31 @@ workflow PB10xMasSeqArrayPreProcessing {
 
         scatter (sharded_reads in ShardLongReads.unmapped_shards) {
 
-            # 1 - filter the reads by the minimum read quality:
-            String fbmrq_prefix = basename(sharded_reads, ".bam")
-            call Utils.Bamtools as FilterByMinReadQuality {
+            # 0 - Filter out the kinetics tags from PB files:
+            call PB.RemoveKineticsTags {
+                input:
+                    bam = sharded_reads,
+                    prefix = SM + "_kinetics_removed"
+            }
+
+            # 1 - filter the reads by the maximum length.
+            # NOTE: Because of the reclamation process we only limit length here and allow the following workflows to
+            #       perform the actual read quality filtering.
+            String fbmrq_prefix = basename(RemoveKineticsTags.bam_file, ".bam")
+            call Utils.Bamtools as FilterByMaxReadLength {
                 input:
                     bamfile = sharded_reads,
                     prefix = fbmrq_prefix + "_good_reads",
                     cmd = "filter",
-                    args = '-tag "rq":">=' + min_read_quality + '"',
+                    args = '-length "<=' + max_read_length + '"',
                     runtime_attr_override = disable_preemption
             }
 
             # 2 - split the reads by the model:
-            String adis_prefix = basename(FilterByMinReadQuality.bam_out, ".bam")
+            String adis_prefix = basename(FilterByMaxReadLength.bam_out, ".bam")
             call LONGBOW.Demultiplex as AssignReadsToModels {
                 input:
-                    bam = FilterByMinReadQuality.bam_out,
+                    bam = FilterByMaxReadLength.bam_out,
                     prefix = adis_prefix,
                     runtime_attr_override = disable_preemption
             }
