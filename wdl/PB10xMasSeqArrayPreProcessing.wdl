@@ -126,10 +126,17 @@ workflow PB10xMasSeqArrayPreProcessing {
                 prefix = SM + "_mas15.reads",
                 runtime_attr_override = disable_preemption
         }
+
+        # Create an object to make things faster by allocating more resources:
+        RuntimeAttr bigger_resources_for_network = object {
+            cpu_cores:  4,
+            mem_gb:     8,
+            preemptible_tries:  0
+        }
         call PB.PBIndex as PbIndexMas15Bam {
             input:
                 bam = MergeMas15Bams.merged_bam,
-                runtime_attr_override = disable_preemption
+                runtime_attr_override = bigger_resources_for_network
         }
 
         # Finalize our merged reads:

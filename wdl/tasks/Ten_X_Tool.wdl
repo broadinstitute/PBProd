@@ -97,6 +97,8 @@ task AnnotateBarcodesAndUMIs {
         File? whitelist_10x
         File? whitelist_illumina
 
+        File? illumina_barcoded_bam
+
         Int? poly_t_length
         Int? barcode_length
         Int? umi_length
@@ -108,6 +110,8 @@ task AnnotateBarcodesAndUMIs {
     # Set runtime options:
     String whitelist_10x_arg = if defined(whitelist_10x) then " --whitelist-10x " else ""
     String whitelist_ilmn_arg = if defined(whitelist_illumina) then " --whitelist-illumina " else ""
+
+    String illumina_barcoded_bam_arg = if defined(illumina_barcoded_bam) then " --illumina-bam " else ""
 
     String poly_t_len_arg = if defined(poly_t_length) then " --poly-t-length " else ""
     String barcode_len_arg = if defined(barcode_length) then " --barcode-length " else ""
@@ -142,6 +146,7 @@ task AnnotateBarcodesAndUMIs {
             --record-umis \
             ~{whitelist_10x_arg}~{default="" sep=" --whitelist-10x " whitelist_10x} \
             ~{whitelist_ilmn_arg}~{default="" sep=" --whitelist-illumina " whitelist_illumina} \
+            ~{illumina_barcoded_bam_arg}~{default="" sep=" --illumina-bam " illumina_barcoded_bam} \
             ~{poly_t_len_arg}~{default="" sep=" --poly-t-length " poly_t_length} \
             ~{barcode_len_arg}~{default="" sep=" --barcode-length " barcode_length} \
             ~{umi_len_arg}~{default="" sep=" --umi-length " umi_length}
@@ -171,7 +176,7 @@ task AnnotateBarcodesAndUMIs {
         boot_disk_gb:       10,
         preemptible_tries:  2,
         max_retries:        1,
-        docker:             "us.gcr.io/broad-dsp-lrma/lr-10x:0.1.13"
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-10x:0.1.14"
     }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
     runtime {

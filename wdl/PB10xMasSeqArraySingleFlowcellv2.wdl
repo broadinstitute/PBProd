@@ -49,7 +49,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         File jupyter_template_static = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/MAS-seq_QC_report_template-static.ipynb"
         File workflow_dot_file = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/PB10xMasSeqArraySingleFlowcellv2.dot"
 
-        Int min_ccs_passes = 2
+        File? illumina_barcoded_bam
 
         # Default here is 0 because ccs uncorrected reads all seem to have RQ = -1.
         # All pathologically long reads also have RQ = -1.
@@ -88,7 +88,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         jupyter_template_static : "Jupyter notebook / ipynb file containing a template for the QC report which will contain static plots.  This should contain the same information as the jupyter_template_interactive file, but with static images."
         workflow_dot_file : "DOT file containing the representation of this WDL to be included in the QC reports.  This can be generated with womtool."
 
-        min_ccs_passes : "[optional] Minimum number of passes required for CCS to take place on a ZMW (Default: 2)."
+        illumina_barcoded_bam : "[optional] Illumina short reads file from a replicate of this same sample.  Used to perform cell barcode corrections."
+
         min_read_quality : "[optional] Minimum read quality for reads to have to be included in our data (Default: 0.0)."
         max_reclamation_length : "[optional] Maximum length (in bases) that a read can be to attempt to reclaim from CCS rejection (Default: 60000)."
 
@@ -112,8 +113,12 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     # Make sure we have **EXACTLY** one bam file to run on:
     if (length(top_level_bam_files) != 1) {
-        call Utils.FailWithWarning { input: warning = "Error: Multiple BAM files found.  Cannot continue!" }
-     }
+        call Utils.FailWithWarning as WARN1 { input: warning = "Error: Multiple BAM files found.  Cannot continue!" }
+    }
+
+    if (use_subreads) {
+        call Utils.FailWithWarning as WARN2 { input: warning = "Error: This workflow now only supports data from the Sequel IIe." }
+    }
 
     # Alias our bam file so we can work with it easier:
     File reads_bam = top_level_bam_files[0]
@@ -131,16 +136,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     String RG_subreads  = "@RG\\tID:~{ID}.subreads\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
     String RG_consensus = "@RG\\tID:~{ID}.consensus\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
     String RG_array_elements = "@RG\\tID:~{ID}.array_elements\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
-
-    # Get statistics on polymerase reads:
-    if (use_subreads) {
-        call PB.CollectPolymeraseReadLengths {
-            input:
-                gcs_input_dir = gcs_input_dir,
-                subreads = reads_bam,
-                prefix = SM + "_polymerase_read_lengths"
-        }
-    }
 
     # Check to see if we need to annotate our reads:
     call LONGBOW.CheckForAnnotatedArrayReads {
@@ -173,270 +168,126 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 prefix = SM + "_kinetics_removed"
         }
 
-        if (use_subreads) {
-            # Call CCS on the subreads from the sequencer:
-            # No preepting because these take long enough that it doesn't seem to save $
-            # 16 gigs of memory because I had a crash at 8
-            RuntimeAttr ccs_runtime_attrs = object {
-                mem_gb: 16,
-                preemptible_tries: 0
-            }
-            call PB.CCS {
+        # Handle setting up the things that we need for further processing of CCS-only reads:
+        call PB.FindCCSReport {
+            input:
+                gcs_input_dir = gcs_input_dir
+        }
+
+        # 1 - filter the reads by the minimum read quality:
+        call Utils.Bamtools as FilterS2EByMinReadQuality {
+            input:
+                bamfile = RemoveKineticsTags.bam_file,
+                prefix = fbmrq_prefix + "_good_reads",
+                cmd = "filter",
+                args = '-tag "rq":">=' + min_read_quality + '"',
+                runtime_attr_override = disable_preemption_runtime_attrs
+        }
+
+        # 1.5 - Get the "rejected" reads:
+        call Utils.Bamtools as GetS2ERCcsRejectedReads {
+            input:
+                bamfile = RemoveKineticsTags.bam_file,
+                prefix = fbmrq_prefix + "_rejected_reads",
+                cmd = "filter",
+                args = '-tag "rq":"<' + min_read_quality + '"',
+                runtime_attr_override = disable_preemption_runtime_attrs
+        }
+
+        # 2 - Get reads we can reclaim:
+        call Utils.Bamtools as ExtractS2ECcsReclaimableReads {
+            input:
+                bamfile = RemoveKineticsTags.bam_file,
+                prefix = fbmrq_prefix + "_reads_for_ccs_reclamation",
+                cmd = "filter",
+                args = '-tag "rq":"<' + min_read_quality + '" -length "<=' + max_reclamation_length + '"',
+                runtime_attr_override = disable_preemption_runtime_attrs
+        }
+
+        if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
+            # 3: Longbow annotate ccs reads
+            call LONGBOW.Annotate as AnnotateS2ECCSReads {
                 input:
-                    subreads = RemoveKineticsTags.bam_file,
-                    min_passes = min_ccs_passes,
-                    disk_space_scale_factor = 4,
-                    runtime_attr_override = ccs_runtime_attrs
-            }
-            call PB.PBIndex as PBIndexCCSReads { input: bam = CCS.consensus }
-
-            # Get our uncorrected / CCS Rejected reads:
-            call PB.ExtractUncorrectedReads {
-                input:
-                    subreads = RemoveKineticsTags.bam_file,
-                    consensus = CCS.consensus,
-                    prefix = SM + "_ccs_rejected",
-                    runtime_attr_override = disable_preemption_runtime_attrs
-            }
-
-            # Extract reclaimable reads:
-            call Utils.Bamtools as ExtractCcsReclaimableReads {
-                input:
-                    bamfile = ExtractUncorrectedReads.uncorrected,
-                    prefix = fbmrq_prefix + "_reads_for_ccs_reclamation",
-                    cmd = "filter",
-                    args = '-length "<=' + max_reclamation_length + '"',
-                    runtime_attr_override = disable_preemption_runtime_attrs
-            }
-            ###################
-
-            if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
-                # 3: Longbow annotate ccs reads
-                call LONGBOW.Annotate as AnnotateCCSReads {
-                    input:
-                        reads = CCS.consensus,
-                        model = mas_seq_model
-                }
-                # 4: Longbow annotate reclaimable reads
-                call LONGBOW.Annotate as AnnotateReclaimableReads {
-                    input:
-                        reads = ExtractCcsReclaimableReads.bam_out,
-                        model = mas_seq_model
-                }
-            }
-
-            File annotated_ccs_file = if CheckForAnnotatedArrayReads.bam_has_annotations then CCS.consensus else select_first([AnnotateCCSReads.annotated_bam])
-            File annotated_reclaimable_file = if CheckForAnnotatedArrayReads.bam_has_annotations then ExtractCcsReclaimableReads.bam_out else select_first([AnnotateReclaimableReads.annotated_bam])
-
-            # 5: Longbow filter ccs annotated reads
-            call LONGBOW.Filter as FilterCCSReads {
-                input:
-                    bam = annotated_ccs_file,
-                    prefix = SM + "_subshard",
+                    reads = FilterS2EByMinReadQuality.bam_out,
                     model = mas_seq_model
             }
-
-            # 6: Longbow filter ccs reclaimable reads
-            call LONGBOW.Filter as FilterReclaimableReads {
+            # 4: Longbow annotate reclaimable reads
+            call LONGBOW.Annotate as AnnotateS2EReclaimableReads {
                 input:
-                    bam = annotated_reclaimable_file,
-                    prefix = SM + "_subshard",
+                    reads = ExtractS2ECcsReclaimableReads.bam_out,
                     model = mas_seq_model
             }
+        }
 
-            # 7: Merge reclaimed and ccs longbow filtered reads
-            call Utils.MergeBams as MergeLongbowPassedReads {
+        File annotated_S2E_ccs_file = if CheckForAnnotatedArrayReads.bam_has_annotations then FilterS2EByMinReadQuality.bam_out else select_first([AnnotateS2ECCSReads.annotated_bam])
+        File annotated_S2E_reclaimable_file = if CheckForAnnotatedArrayReads.bam_has_annotations then ExtractS2ECcsReclaimableReads.bam_out else select_first([AnnotateS2EReclaimableReads.annotated_bam])
+
+        # 5: Longbow filter ccs annotated reads
+        call LONGBOW.Filter as FilterS2ECCSReads {
             input:
-                bams = [FilterCCSReads.passed_reads, FilterReclaimableReads.passed_reads],
-                prefix = SM + "_LongbowFilter_Failed_1"  # TODO: Fix the name here!!!!!!!!!
-            }
-            call Utils.MergeBams as MergeLongbowFailedReads {
+                bam = annotated_S2E_ccs_file,
+                prefix = SM + "_subshard",
+                model = mas_seq_model
+        }
+
+        # 6: Longbow filter ccs reclaimable reads
+        call LONGBOW.Filter as FilterS2EReclaimableReads {
             input:
-                bams = [FilterCCSReads.failed_reads, FilterReclaimableReads.failed_reads],
+                bam = annotated_S2E_reclaimable_file,
+                prefix = SM + "_subshard",
+                model = mas_seq_model
+        }
+
+        # 7: Merge reclaimed and ccs longbow filtered reads
+        call Utils.MergeBams as MergeLongbowS2EPassedReads {
+            input:
+                bams = [FilterS2ECCSReads.passed_reads, FilterS2EReclaimableReads.passed_reads],
                 prefix = SM + "_LongbowFilter_Failed_1"
-            }
-
-            # 8: PBIndex reads
-            call PB.PBIndex as PbIndexLongbowPassedReads {
-                input:
-                    bam = MergeLongbowPassedReads.merged_bam
-            }
-
-            # 9: Get CCS Reclaimed array elements for further study:
-            call PB.PBIndex as PbIndexCcsReclaimedReads {
-                input:
-                    bam = FilterReclaimableReads.passed_reads
-            }
-            call PB.ShardLongReads as ShardCcsReclaimedReads {
-                input:
-                    unaligned_bam = FilterReclaimableReads.passed_reads,
-                    unaligned_pbi = PbIndexCcsReclaimedReads.pbindex,
-                    prefix = SM + "_ccs_reclaimed_reads_subshard",
-                    num_shards = 10,
-            }
-            scatter (ccs_reclaimed_shard in ShardCcsReclaimedReads.unmapped_shards) {
-                call LONGBOW.Segment as SegmentCcsReclaimedReads {
-                    input:
-                        annotated_reads = ccs_reclaimed_shard,
-                        prefix = SM + "_ccs_reclaimed_array_elements_subshard",
-                        model = mas_seq_model
-                }
-            }
-            call Utils.MergeBams as MergeCcsReclaimedArrayElementSubshards {
-            input:
-                bams = SegmentCcsReclaimedReads.segmented_bam,
-                prefix = SM + "_ccs_reclaimed_array_elements_shard"
-            }
-
-            ###################
-            # Get ZMW stats:
-            call PB.PBIndex as PBIndexSubreadShard { input: bam = RemoveKineticsTags.bam_file }
-            call PB.ShardLongReads as SubshardRawSubreads {
-                input:
-                    unaligned_bam = RemoveKineticsTags.bam_file,
-                    unaligned_pbi = PBIndexSubreadShard.pbindex,
-                    num_shards = 10,
-                    prefix = "subshard"
-            }
-            scatter (subsharded_subreads in SubshardRawSubreads.unmapped_shards) {
-
-                # Get ZMW Subread stats here to shard them out wider and make it faster:
-                call PB.CollectZmwSubreadStats as CollectZmwSubreadStats_subsharded {
-                    input:
-                        subreads = subsharded_subreads,
-                        prefix = SM + "_zmw_subread_stats"
-                }
-            }
-
-            # Merge our micro-shards of subread stats:
-            call Utils.MergeTsvFiles as MergeMicroShardedZmwSubreadStats {
-                input:
-                    tsv_files = CollectZmwSubreadStats_subsharded.zmw_subread_stats
-            }
         }
-        if (!use_subreads) {
-            # Handle setting up the things that we need for further processing of CCS-only reads:
-            call PB.FindCCSReport {
+        call Utils.MergeBams as MergeLongbowS2EFailedReads {
+            input:
+                bams = [FilterS2ECCSReads.failed_reads, FilterS2EReclaimableReads.failed_reads],
+                prefix = SM + "_LongbowFilter_Failed_1"
+        }
+
+        # 8: PBIndex reads
+        call PB.PBIndex as PbIndexS2ELongbowPassedReads {
+            input:
+                bam = MergeLongbowS2EPassedReads.merged_bam
+        }
+
+        # 9: Get CCS Reclaimed array elements for further study:
+        call PB.PBIndex as PbIndexS2ECcsReclaimedReads {
+            input:
+                bam = FilterS2EReclaimableReads.passed_reads
+        }
+        call PB.ShardLongReads as ShardS2ECcsReclaimedReads {
+            input:
+                unaligned_bam = FilterS2EReclaimableReads.passed_reads,
+                unaligned_pbi = PbIndexS2ECcsReclaimedReads.pbindex,
+                prefix = SM + "_ccs_reclaimed_reads_subshard",
+                num_shards = 10,
+        }
+        scatter (s2e_ccs_reclaimed_shard in ShardS2ECcsReclaimedReads.unmapped_shards) {
+            call LONGBOW.Segment as SegmentS2ECcsReclaimedReads {
                 input:
-                    gcs_input_dir = gcs_input_dir
-            }
-
-            # 1 - filter the reads by the minimum read quality:
-            call Utils.Bamtools as FilterS2EByMinReadQuality {
-                input:
-                    bamfile = RemoveKineticsTags.bam_file,
-                    prefix = fbmrq_prefix + "_good_reads",
-                    cmd = "filter",
-                    args = '-tag "rq":">=' + min_read_quality + '"',
-                    runtime_attr_override = disable_preemption_runtime_attrs
-            }
-
-            # 1.5 - Get the "rejected" reads:
-            call Utils.Bamtools as GetS2ERCcsRejectedReads {
-                input:
-                    bamfile = RemoveKineticsTags.bam_file,
-                    prefix = fbmrq_prefix + "_rejected_reads",
-                    cmd = "filter",
-                    args = '-tag "rq":"<' + min_read_quality + '"',
-                    runtime_attr_override = disable_preemption_runtime_attrs
-            }
-
-            # 2 - Get reads we can reclaim:
-            call Utils.Bamtools as ExtractS2ECcsReclaimableReads {
-                input:
-                    bamfile = RemoveKineticsTags.bam_file,
-                    prefix = fbmrq_prefix + "_reads_for_ccs_reclamation",
-                    cmd = "filter",
-                    args = '-tag "rq":"<' + min_read_quality + '" -length "<=' + max_reclamation_length + '"',
-                    runtime_attr_override = disable_preemption_runtime_attrs
-            }
-
-            if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
-                # 3: Longbow annotate ccs reads
-                call LONGBOW.Annotate as AnnotateS2ECCSReads {
-                    input:
-                        reads = FilterS2EByMinReadQuality.bam_out,
-                        model = mas_seq_model
-                }
-                # 4: Longbow annotate reclaimable reads
-                call LONGBOW.Annotate as AnnotateS2EReclaimableReads {
-                    input:
-                        reads = ExtractS2ECcsReclaimableReads.bam_out,
-                        model = mas_seq_model
-                }
-            }
-
-            File annotated_S2E_ccs_file = if CheckForAnnotatedArrayReads.bam_has_annotations then FilterS2EByMinReadQuality.bam_out else select_first([AnnotateS2ECCSReads.annotated_bam])
-            File annotated_S2E_reclaimable_file = if CheckForAnnotatedArrayReads.bam_has_annotations then ExtractS2ECcsReclaimableReads.bam_out else select_first([AnnotateS2EReclaimableReads.annotated_bam])
-
-            # 5: Longbow filter ccs annotated reads
-            call LONGBOW.Filter as FilterS2ECCSReads {
-                input:
-                    bam = annotated_S2E_ccs_file,
-                    prefix = SM + "_subshard",
+                    annotated_reads = s2e_ccs_reclaimed_shard,
+                    prefix = SM + "_ccs_reclaimed_array_elements_subshard",
                     model = mas_seq_model
             }
-
-            # 6: Longbow filter ccs reclaimable reads
-            call LONGBOW.Filter as FilterS2EReclaimableReads {
-                input:
-                    bam = annotated_S2E_reclaimable_file,
-                    prefix = SM + "_subshard",
-                    model = mas_seq_model
-            }
-
-            # 7: Merge reclaimed and ccs longbow filtered reads
-            call Utils.MergeBams as MergeLongbowS2EPassedReads {
-                input:
-                    bams = [FilterS2ECCSReads.passed_reads, FilterS2EReclaimableReads.passed_reads],
-                    prefix = SM + "_LongbowFilter_Failed_1"
-            }
-            call Utils.MergeBams as MergeLongbowS2EFailedReads {
-                input:
-                    bams = [FilterS2ECCSReads.failed_reads, FilterS2EReclaimableReads.failed_reads],
-                    prefix = SM + "_LongbowFilter_Failed_1"
-            }
-
-            # 8: PBIndex reads
-            call PB.PBIndex as PbIndexS2ELongbowPassedReads {
-                input:
-                    bam = MergeLongbowS2EPassedReads.merged_bam
-            }
-
-            # 9: Get CCS Reclaimed array elements for further study:
-            call PB.PBIndex as PbIndexS2ECcsReclaimedReads {
-                input:
-                    bam = FilterS2EReclaimableReads.passed_reads
-            }
-            call PB.ShardLongReads as ShardS2ECcsReclaimedReads {
-                input:
-                    unaligned_bam = FilterS2EReclaimableReads.passed_reads,
-                    unaligned_pbi = PbIndexS2ECcsReclaimedReads.pbindex,
-                    prefix = SM + "_ccs_reclaimed_reads_subshard",
-                    num_shards = 10,
-            }
-            scatter (s2e_ccs_reclaimed_shard in ShardS2ECcsReclaimedReads.unmapped_shards) {
-                call LONGBOW.Segment as SegmentS2ECcsReclaimedReads {
-                    input:
-                        annotated_reads = s2e_ccs_reclaimed_shard,
-                        prefix = SM + "_ccs_reclaimed_array_elements_subshard",
-                        model = mas_seq_model
-                }
-            }
-            call Utils.MergeBams as MergeS2ECcsReclaimedArrayElementSubshards {
-            input:
-                bams = SegmentS2ECcsReclaimedReads.segmented_bam,
-                prefix = SM + "_ccs_reclaimed_array_elements_shard"
-            }
         }
+        call Utils.MergeBams as MergeS2ECcsReclaimedArrayElementSubshards {
+        input:
+            bams = SegmentS2ECcsReclaimedReads.segmented_bam,
+            prefix = SM + "_ccs_reclaimed_array_elements_shard"
+        }
+
 
         # Shard these reads even wider so we can make sure we don't run out of memory:
-        File longbow_passed_reads = if use_subreads then select_first([MergeLongbowPassedReads.merged_bam]) else select_first([MergeLongbowS2EPassedReads.merged_bam])
-        File longbow_passed_reads_pbi = if use_subreads then select_first([PbIndexLongbowPassedReads.pbindex]) else select_first([PbIndexS2ELongbowPassedReads.pbindex])
         call PB.ShardLongReads as ShardCorrectedReads {
             input:
-                unaligned_bam = longbow_passed_reads,
-                unaligned_pbi = longbow_passed_reads_pbi,
+                unaligned_bam = MergeLongbowS2EPassedReads.merged_bam,
+                unaligned_pbi = PbIndexS2ELongbowPassedReads.pbindex,
                 prefix = SM + "_longbow_all_passed_subshard",
                 num_shards = 10,
         }
@@ -478,6 +329,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                     head_adapter_fasta = head_adapter_fasta,
                     tail_adapter_fasta = tail_adapter_fasta,
                     whitelist_10x = ten_x_cell_barcode_whitelist,
+                    illumina_barcoded_bam = illumina_barcoded_bam,
                     read_end_length = 200,
                     poly_t_length = 31,
                     barcode_length = 16,
@@ -578,87 +430,56 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     # input bam file.
     #################################################
 
-    # Merge the files from the first half based on whether we had Sequel II or Sequel IIE data:
-    if (use_subreads) {
-        # Sequel II Data.
-        # CCS Passed:
-        call Utils.MergeBams as MergeCCSReads { input: bams = select_all(CCS.consensus), prefix = SM + "_ccs_reads" }
-        call Utils.MergeBams as MergeCCSRejectedReads { input: bams = select_all(ExtractUncorrectedReads.uncorrected), prefix = SM + "_ccs_rejected_reads" }
-        call Utils.MergeBams as MergeAnnotatedCCSReads { input: bams = select_all(annotated_ccs_file), prefix = SM + "_ccs_reads_annotated" }
-        call Utils.MergeBams as MergeLongbowPassedCCSReads { input: bams = select_all(FilterCCSReads.passed_reads), prefix = SM + "_ccs_reads_annotated_longbow_passed" }
-        call Utils.MergeBams as MergeLongbowFailedCCSReads { input: bams = select_all(FilterCCSReads.failed_reads), prefix = SM + "_ccs_reads_annotated_longbow_failed" }
+    # Sequel IIe Data.
+    # CCS Passed:
+    call Utils.MergeBams as MergeCCSRqFilteredReads { input: bams = FilterS2EByMinReadQuality.bam_out, prefix = SM + "_ccs_reads" }
+    call Utils.MergeBams as MergeCCSRqRejectedReads { input: bams = GetS2ERCcsRejectedReads.bam_out, prefix = SM + "_ccs_rejected_reads" }
+    call Utils.MergeBams as MergeAnnotatedCCSReads_S2e { input: bams = annotated_S2E_ccs_file, prefix = SM + "_ccs_reads_annotated" }
+    call Utils.MergeBams as MergeLongbowPassedCCSReads_S2e { input: bams = FilterS2ECCSReads.passed_reads, prefix = SM + "_ccs_reads_annotated_longbow_passed" }
+    call Utils.MergeBams as MergeLongbowFailedCCSReads_S2e { input: bams = FilterS2ECCSReads.failed_reads, prefix = SM + "_ccs_reads_annotated_longbow_failed" }
 
-        # CCS Failed / Reclaimable:
-        call Utils.MergeBams as MergeCCSReclaimableReads { input: bams = select_all(ExtractCcsReclaimableReads.bam_out), prefix = SM + "_ccs_rejected_reclaimable"  }
-        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads { input: bams = select_all(annotated_reclaimable_file), prefix = SM + "_ccs_rejected_reclaimable_annotated" }
-        call Utils.MergeBams as MergeLongbowPassedReclaimable { input: bams = select_all(FilterReclaimableReads.passed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_passed" }
-        call Utils.MergeBams as MergeLongbowFailedReclaimable { input: bams = select_all(FilterReclaimableReads.failed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_failed"  }
+    # CCS Failed / Reclaimable:
+    call Utils.MergeBams as MergeCCSReclaimableReads_S2e { input: bams = ExtractS2ECcsReclaimableReads.bam_out, prefix = SM + "_ccs_rejected_reclaimable" }
+    call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads_S2e { input: bams = annotated_S2E_reclaimable_file, prefix = SM + "_ccs_rejected_reclaimable_annotated" }
+    call Utils.MergeBams as MergeLongbowPassedReclaimable_S2e { input: bams = FilterS2EReclaimableReads.passed_reads, prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_passed" }
+    call Utils.MergeBams as MergeLongbowFailedReclaimable_S2e { input: bams = FilterS2EReclaimableReads.failed_reads, prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_failed" }
 
-        # All Longbow Passed / Failed reads:
-        call Utils.MergeBams as MergeAllLongbowPassedReads { input: bams = select_all(MergeLongbowPassedReads.merged_bam), prefix = SM + "_all_longbow_passed"  }
-        call Utils.MergeBams as MergeAllLongbowFailedReads { input: bams = select_all(MergeLongbowFailedReads.merged_bam), prefix = SM + "_all_longbow_failed" }
+    # All Longbow Passed / Failed reads:
+    call Utils.MergeBams as MergeAllLongbowPassedReads_S2e { input: bams = MergeLongbowS2EPassedReads.merged_bam, prefix = SM + "_all_longbow_passed" }
+    call Utils.MergeBams as MergeAllLongbowFailedReads_S2e { input: bams = MergeLongbowS2EFailedReads.merged_bam, prefix = SM + "_all_longbow_failed" }
 
-        # Merge the sharded zmw subread stats:
-        call Utils.MergeTsvFiles as MergeShardedZmwSubreadStats {
-            input:
-                tsv_files = select_all(MergeMicroShardedZmwSubreadStats.merged_tsv),
-                prefix = SM + "_zmw_subread_stats"
-        }
+    # Merge CCS Reclaimed Array elements:
+    call Utils.MergeBams as MergeCCSReclaimedArrayElements_S2e { input: bams = MergeS2ECcsReclaimedArrayElementSubshards.merged_bam, prefix = SM + "_ccs_reclaimed_array_elements"  }
 
-        # Merge CCS Reclaimed Array elements:
-        call Utils.MergeBams as MergeCCSReclaimedArrayElements { input: bams = select_all(MergeCcsReclaimedArrayElementSubshards.merged_bam), prefix = SM + "_ccs_reclaimed_array_elements"  }
-    }
-    if (!use_subreads) {
-        # Sequel IIe Data.
-        # CCS Passed:
-        call Utils.MergeBams as MergeCCSRqFilteredReads { input: bams = select_all(FilterS2EByMinReadQuality.bam_out), prefix = SM + "_ccs_reads" }
-        call Utils.MergeBams as MergeCCSRqRejectedReads { input: bams = select_all(GetS2ERCcsRejectedReads.bam_out), prefix = SM + "_ccs_rejected_reads" }
-        call Utils.MergeBams as MergeAnnotatedCCSReads_S2e { input: bams = select_all(annotated_S2E_ccs_file), prefix = SM + "_ccs_reads_annotated" }
-        call Utils.MergeBams as MergeLongbowPassedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.passed_reads), prefix = SM + "_ccs_reads_annotated_longbow_passed" }
-        call Utils.MergeBams as MergeLongbowFailedCCSReads_S2e { input: bams = select_all(FilterS2ECCSReads.failed_reads), prefix = SM + "_ccs_reads_annotated_longbow_failed" }
-
-        # CCS Failed / Reclaimable:
-        call Utils.MergeBams as MergeCCSReclaimableReads_S2e { input: bams = select_all(ExtractS2ECcsReclaimableReads.bam_out), prefix = SM + "_ccs_rejected_reclaimable" }
-        call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads_S2e { input: bams = select_all(annotated_S2E_reclaimable_file), prefix = SM + "_ccs_rejected_reclaimable_annotated" }
-        call Utils.MergeBams as MergeLongbowPassedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.passed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_passed" }
-        call Utils.MergeBams as MergeLongbowFailedReclaimable_S2e { input: bams = select_all(FilterS2EReclaimableReads.failed_reads), prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_failed" }
-
-        # All Longbow Passed / Failed reads:
-        call Utils.MergeBams as MergeAllLongbowPassedReads_S2e { input: bams = select_all(MergeLongbowS2EPassedReads.merged_bam), prefix = SM + "_all_longbow_passed" }
-        call Utils.MergeBams as MergeAllLongbowFailedReads_S2e { input: bams = select_all(MergeLongbowS2EFailedReads.merged_bam), prefix = SM + "_all_longbow_failed" }
-
-        # Merge CCS Reclaimed Array elements:
-        call Utils.MergeBams as MergeCCSReclaimedArrayElements_S2e { input: bams = select_all(MergeS2ECcsReclaimedArrayElementSubshards.merged_bam), prefix = SM + "_ccs_reclaimed_array_elements"  }
-    }
 
     # Alias out the data we need to pass into stuff later:
-    File ccs_corrected_reads = if (use_subreads) then select_first([MergeCCSReads.merged_bam]) else select_first([MergeCCSRqFilteredReads.merged_bam])
-    File ccs_corrected_reads_index = if (use_subreads) then select_first([MergeCCSReads.merged_bai]) else select_first([MergeCCSRqFilteredReads.merged_bai])
-    File ccs_rejected_reads = if (use_subreads) then select_first([MergeCCSRejectedReads.merged_bam]) else select_first([MergeCCSRqRejectedReads.merged_bam])
-    File ccs_rejected_reads_index = if (use_subreads) then select_first([MergeCCSRejectedReads.merged_bai]) else select_first([MergeCCSRqRejectedReads.merged_bai])
-    File annotated_ccs_reads = if (use_subreads) then select_first([MergeAnnotatedCCSReads.merged_bam]) else select_first([MergeAnnotatedCCSReads_S2e.merged_bam])
-    File annotated_ccs_reads_index = if (use_subreads) then select_first([MergeAnnotatedCCSReads.merged_bai]) else select_first([MergeAnnotatedCCSReads_S2e.merged_bai])
-    File longbow_passed_ccs_reads = if (use_subreads) then select_first([MergeLongbowPassedCCSReads.merged_bam]) else select_first([MergeLongbowPassedCCSReads_S2e.merged_bam])
-    File longbow_passed_ccs_reads_index = if (use_subreads) then select_first([MergeLongbowPassedCCSReads.merged_bai]) else select_first([MergeLongbowPassedCCSReads_S2e.merged_bai])
-    File longbow_failed_ccs_reads = if (use_subreads) then select_first([MergeLongbowFailedCCSReads.merged_bam]) else select_first([MergeLongbowFailedCCSReads_S2e.merged_bam])
-    File longbow_failed_ccs_reads_index = if (use_subreads) then select_first([MergeLongbowFailedCCSReads.merged_bai]) else select_first([MergeLongbowFailedCCSReads_S2e.merged_bai])
-    File ccs_reclaimable_reads = if (use_subreads) then select_first([MergeCCSReclaimableReads.merged_bam]) else select_first([MergeCCSReclaimableReads_S2e.merged_bam])
-    File ccs_reclaimable_reads_index = if (use_subreads) then select_first([MergeCCSReclaimableReads.merged_bai]) else select_first([MergeCCSReclaimableReads_S2e.merged_bai])
+    File ccs_corrected_reads = MergeCCSRqFilteredReads.merged_bam
+    File ccs_corrected_reads_index = MergeCCSRqFilteredReads.merged_bai
+    File ccs_rejected_reads = MergeCCSRqRejectedReads.merged_bam
+    File ccs_rejected_reads_index = MergeCCSRqRejectedReads.merged_bai
+    File annotated_ccs_reads = MergeAnnotatedCCSReads_S2e.merged_bam
+    File annotated_ccs_reads_index = MergeAnnotatedCCSReads_S2e.merged_bai
+    File longbow_passed_ccs_reads = MergeLongbowPassedCCSReads_S2e.merged_bam
+    File longbow_passed_ccs_reads_index = MergeLongbowPassedCCSReads_S2e.merged_bai
+    File longbow_failed_ccs_reads = MergeLongbowFailedCCSReads_S2e.merged_bam
+    File longbow_failed_ccs_reads_index = MergeLongbowFailedCCSReads_S2e.merged_bai
+    File ccs_reclaimable_reads = MergeCCSReclaimableReads_S2e.merged_bam
+    File ccs_reclaimable_reads_index = MergeCCSReclaimableReads_S2e.merged_bai
     
-    File annotated_ccs_reclaimable_reads = if (use_subreads) then select_first([MergeCCSReclaimableAnnotatedReads.merged_bam]) else select_first([MergeCCSReclaimableAnnotatedReads_S2e.merged_bam])
+    File annotated_ccs_reclaimable_reads = MergeCCSReclaimableAnnotatedReads_S2e.merged_bam
     
-    File annotated_ccs_reclaimable_reads_index = if (use_subreads) then select_first([MergeCCSReclaimableAnnotatedReads.merged_bai]) else select_first([MergeCCSReclaimableAnnotatedReads_S2e.merged_bai])
-    File ccs_reclaimed_reads = if (use_subreads) then select_first([MergeLongbowPassedReclaimable.merged_bam]) else select_first([MergeLongbowPassedReclaimable_S2e.merged_bam])
-    File ccs_reclaimed_reads_index = if (use_subreads) then select_first([MergeLongbowPassedReclaimable.merged_bai]) else select_first([MergeLongbowPassedReclaimable_S2e.merged_bai])
-    File longbow_failed_ccs_unreclaimable_reads = if (use_subreads) then select_first([MergeLongbowFailedReclaimable.merged_bam]) else select_first([MergeLongbowFailedReclaimable_S2e.merged_bam])
-    File longbow_failed_ccs_unreclaimable_reads_index = if (use_subreads) then select_first([MergeLongbowFailedReclaimable.merged_bai]) else select_first([MergeLongbowFailedReclaimable_S2e.merged_bai])
-    File longbow_passed_reads = if (use_subreads) then select_first([MergeAllLongbowPassedReads.merged_bam]) else select_first([MergeAllLongbowPassedReads_S2e.merged_bam])
-    File longbow_passed_reads_index = if (use_subreads) then select_first([MergeAllLongbowPassedReads.merged_bai]) else select_first([MergeAllLongbowPassedReads_S2e.merged_bai])
-    File longbow_failed_reads = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bam]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bam])
-    File longbow_failed_reads_index = if (use_subreads) then select_first([MergeAllLongbowFailedReads.merged_bai]) else select_first([MergeAllLongbowFailedReads_S2e.merged_bai])
+    File annotated_ccs_reclaimable_reads_index = MergeCCSReclaimableAnnotatedReads_S2e.merged_bai
+    File ccs_reclaimed_reads = MergeLongbowPassedReclaimable_S2e.merged_bam
+    File ccs_reclaimed_reads_index = MergeLongbowPassedReclaimable_S2e.merged_bai
+    File longbow_failed_ccs_unreclaimable_reads = MergeLongbowFailedReclaimable_S2e.merged_bam
+    File longbow_failed_ccs_unreclaimable_reads_index = MergeLongbowFailedReclaimable_S2e.merged_bai
+    File longbow_passed_reads = MergeAllLongbowPassedReads_S2e.merged_bam
+    File longbow_passed_reads_index = MergeAllLongbowPassedReads_S2e.merged_bai
+    File longbow_failed_reads = MergeAllLongbowFailedReads_S2e.merged_bam
+    File longbow_failed_reads_index = MergeAllLongbowFailedReads_S2e.merged_bai
 
-    File ccs_reclaimed_array_elements = if (use_subreads) then select_first([MergeCCSReclaimedArrayElements.merged_bam]) else select_first([MergeCCSReclaimedArrayElements_S2e.merged_bam])
-    File ccs_reclaimed_array_elements_index = if (use_subreads) then select_first([MergeCCSReclaimedArrayElements.merged_bai]) else select_first([MergeCCSReclaimedArrayElements_S2e.merged_bai])
+    File ccs_reclaimed_array_elements = MergeCCSReclaimedArrayElements_S2e.merged_bam
+    File ccs_reclaimed_array_elements_index = MergeCCSReclaimedArrayElements_S2e.merged_bai
 
     # Merge all CCS bams together for this Subread BAM:
     RuntimeAttr merge_extra_cpu_attrs = object {
@@ -685,10 +506,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 prefix = SM + "_10x_stats"
         }
     }
-
-    # Merge all CCS reports together for this Subread BAM:
-    Array[File] ccs_reports_to_merge = if use_subreads then select_all(CCS.report) else select_all(FindCCSReport.ccs_report)
-    call PB.MergeCCSReports as MergeCCSReports { input: reports = ccs_reports_to_merge }
 
     # Collect metrics on the subreads bam:
     RuntimeAttr subreads_sam_stats_runtime_attrs = object {
@@ -766,8 +583,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             base_metrics_out_dir = metrics_out_dir + "/transcriptome_aligned_array_element_metrics"
     }
 
-    # If we aren't using subreads, all the CCS reports are the same and we should not merge them!
-    File final_ccs_report = if use_subreads then MergeCCSReports.report else select_first(FindCCSReport.ccs_report)
+    # We should have exactly 1 CCS report for Sequel IIe reads:
+    File final_ccs_report = FindCCSReport.ccs_report[0]
 
     ##########################################################################################
     #         ____                _                ____                       _
@@ -810,19 +627,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             raw_array_elements                = MergeCbcUmiArrayElements.merged_bam,
             ccs_reclaimed_array_elements      = ccs_reclaimed_array_elements,
 
-#            # Need to pass indices as well so we can easily get counts out of them:
-#            raw_ccs_bam_file_idx                  = ccs_corrected_reads_index,
-#            ccs_rejected_bam_file_idx             = ccs_rejected_reads_index,
-#            longbow_passed_reads_file_idx         = longbow_passed_reads_index,
-#            longbow_failed_reads_file_idx         = longbow_failed_reads_index,
-#            ccs_reclaimable_reads_idx             = annotated_ccs_reclaimable_reads_index,
-#            ccs_reclaimed_reads_idx               = ccs_reclaimed_reads_index,
-#            ccs_rejected_longbow_failed_reads_idx = longbow_failed_ccs_unreclaimable_reads_index,
-#            raw_array_elements_idx                = MergeCbcUmiArrayElements.merged_bai,
-#            ccs_reclaimed_array_elements_idx      = ccs_reclaimed_array_elements_index,
-
-            zmw_subread_stats_file            = MergeShardedZmwSubreadStats.merged_tsv,
-            polymerase_read_lengths_file      = CollectPolymeraseReadLengths.polymerase_read_lengths_tsv,
+            zmw_stats_json_gz                 = FindZmwStatsJsonGz.zmw_stats_json_gz,
 
             ten_x_metrics_file                = Merge10XStats_1.merged_tsv,
             mas_seq_model                     = mas_seq_model,
@@ -969,23 +774,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             files = [ final_ccs_report ],
             outdir = metrics_out_dir + "/ccs_metrics",
             keyfile = GenerateStaticReport.html_report
-    }
-
-    # Finalize the files that we have created from raw subreads containing runs:
-    if (use_subreads) {
-        call FF.FinalizeToDir as FinalizeZmwSubreadStats {
-            input:
-                files = select_all([MergeShardedZmwSubreadStats.merged_tsv]),
-                outdir = metrics_out_dir + "/ccs_metrics",
-                keyfile = GenerateStaticReport.html_report
-        }
-
-        call FF.FinalizeToDir as FinalizePolymeraseReadLengths {
-            input:
-                files = select_all([CollectPolymeraseReadLengths.polymerase_read_lengths_tsv]),
-                outdir = metrics_out_dir + "/array_stats",
-                keyfile = GenerateStaticReport.html_report
-        }
     }
 
     ##############################################################################################################

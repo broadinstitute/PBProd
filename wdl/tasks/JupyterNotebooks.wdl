@@ -38,15 +38,7 @@ task PB10xMasSeqSingleFlowcellReport {
         File raw_array_elements
         File ccs_reclaimed_array_elements
 
-#        File raw_ccs_bam_file_idx
-#        File ccs_rejected_bam_file_idx
-#        File longbow_passed_reads_file_idx
-#        File longbow_failed_reads_file_idx
-#        File ccs_reclaimable_reads_idx
-#        File ccs_reclaimed_reads_idx
-#        File ccs_rejected_longbow_failed_reads_idx
-#        File raw_array_elements_idx
-#        File ccs_reclaimed_array_elements_idx
+        File zmw_stats_json_gz
 
         File? zmw_subread_stats_file
         File? polymerase_read_lengths_file
@@ -90,15 +82,7 @@ task PB10xMasSeqSingleFlowcellReport {
         raw_array_elements : "Bam file containing the raw unaligned array elements created from the longbow_passed_reads_file."
         ccs_reclaimed_array_elements : "Bam file containing the unaligned array elements created from reclaimed CCS reads."
 
-#        raw_ccs_bam_file_idx                  : "Bam index for raw_ccs_bam_file"
-#        ccs_rejected_bam_file_idx             : "Bam index for ccs_rejected_bam_file"
-#        longbow_passed_reads_file_idx         : "Bam index for longbow_passed_reads_file"
-#        longbow_failed_reads_file_idx         : "Bam index for longbow_failed_reads_file"
-#        ccs_reclaimable_reads_idx             : "Bam index for ccs_reclaimable_reads"
-#        ccs_reclaimed_reads_idx               : "Bam index for ccs_reclaimed_reads"
-#        ccs_rejected_longbow_failed_reads_idx : "Bam index for ccs_rejected_longbow_failed_reads"
-#        raw_array_elements_idx                : "Bam index for raw_array_elements"
-#        ccs_reclaimed_array_elements_idx      : "Bam index for ccs_reclaimed_array_elements"
+        zmw_stats_json_gz : "ZMW stats json.gz file from the PacBio instrument."
 
         zmw_subread_stats_file : "[optional] File containing statistics about the subreads from each ZMW (created by collect_zmw_subread_stats.py in the PBUtils docker container)."
         polymerase_read_lengths_file : "[optional] File containing the lengths of each polymerase read from the sequencer (as created by collect_polymerase_read_lengths.py)"
@@ -197,6 +181,8 @@ task PB10xMasSeqSingleFlowcellReport {
         echo "~{ccs_rejected_longbow_failed_reads}" >> mas-seq_qc_inputs.config
         echo "~{raw_array_elements}" >> mas-seq_qc_inputs.config
         echo "~{ccs_reclaimed_array_elements}" >> mas-seq_qc_inputs.config
+
+        echo "~{zmw_stats_json_gz}" >> mas-seq_qc_inputs.config
 
         if ~{zmw_subread_stats_file_flag} ; then
             echo "~{zmw_subread_stats_file}" >> mas-seq_qc_inputs.config
