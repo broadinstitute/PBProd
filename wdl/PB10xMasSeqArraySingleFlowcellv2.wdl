@@ -114,16 +114,16 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     }
 
     # Call our timestamp so we can store outputs without clobbering previous runs:
-    call Utils.GetCurrentTimestampString as WdlExecutionStartTimestamp { input: }
+    call Utils.GetCurrentTimestampString as t_01_WdlExecutionStartTimestamp { input: }
 
     String outdir = sub(gcs_out_root_dir, "/$", "")
 
-    call PB.FindBams { input: gcs_input_dir = gcs_input_dir }
-    call PB.FindZmwStatsJsonGz { input: gcs_input_dir = gcs_input_dir }
+    call PB.FindBams as t_02_FindBams { input: gcs_input_dir = gcs_input_dir }
+    call PB.FindZmwStatsJsonGz as t_03_FindZmwStatsJsonGz { input: gcs_input_dir = gcs_input_dir }
 
     # Check here if we found ccs bams or subread bams:
-    Boolean use_subreads = FindBams.has_subreads
-    Array[String] top_level_bam_files = if use_subreads then FindBams.subread_bams else FindBams.ccs_bams
+    Boolean use_subreads = t_02_FindBams.has_subreads
+    Array[String] top_level_bam_files = if use_subreads then t_02_FindBams.subread_bams else t_02_FindBams.ccs_bams
 
     # Make sure we have **EXACTLY** one bam file to run on:
     if (length(top_level_bam_files) != 1) {
@@ -137,14 +137,14 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     # Alias our bam file so we can work with it easier:
     File reads_bam = top_level_bam_files[0]
 
-    call PB.GetRunInfo { input: subread_bam = reads_bam }
+    call PB.GetRunInfo as t_04_GetRunInfo { input: subread_bam = reads_bam }
 
-    String SM  = select_first([sample_name, GetRunInfo.run_info["SM"]])
+    String SM  = select_first([sample_name, t_04_GetRunInfo.run_info["SM"]])
     String PL  = "PACBIO"
-    String PU  = GetRunInfo.run_info["PU"]
-    String DT  = GetRunInfo.run_info["DT"]
+    String PU  = t_04_GetRunInfo.run_info["PU"]
+    String DT  = t_04_GetRunInfo.run_info["DT"]
     String ID  = PU
-    String DS  = GetRunInfo.run_info["DS"]
+    String DS  = t_04_GetRunInfo.run_info["DS"]
     String DIR = SM + "." + ID
 
     String RG_subreads  = "@RG\\tID:~{ID}.subreads\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
@@ -152,13 +152,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     String RG_array_elements = "@RG\\tID:~{ID}.array_elements\\tSM:~{SM}\\tPL:~{PL}\\tPU:~{PU}\\tDT:~{DT}"
 
     # Check to see if we need to annotate our reads:
-    call LONGBOW.CheckForAnnotatedArrayReads {
+    call LONGBOW.CheckForAnnotatedArrayReads as t_05_CheckForAnnotatedReads {
         input:
             bam = reads_bam
     }
 
     File read_pbi = sub(reads_bam, ".bam$", ".bam.pbi")
-    call PB.ShardLongReads {
+    call PB.ShardLongReads as t_06_ShardLongReads {
         input:
             unaligned_bam = reads_bam,
             unaligned_pbi = read_pbi,
@@ -166,7 +166,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             num_shards = 300,
     }
 
-    scatter (sharded_reads in ShardLongReads.unmapped_shards) {
+    scatter (sharded_reads in t_06_ShardLongReads.unmapped_shards) {
 
         ## No more preemption on this sharding - takes too long otherwise.
         RuntimeAttr disable_preemption_runtime_attrs = object {
@@ -176,22 +176,22 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         String fbmrq_prefix = basename(sharded_reads, ".bam")
 
         # Filter out the kinetics tags from PB files:
-        call PB.RemoveKineticsTags {
+        call PB.RemoveKineticsTags as t_07_RemoveKineticsTags {
             input:
                 bam = sharded_reads,
                 prefix = SM + "_kinetics_removed"
         }
 
         # Handle setting up the things that we need for further processing of CCS-only reads:
-        call PB.FindCCSReport {
+        call PB.FindCCSReport as t_08_FindCCSReport {
             input:
                 gcs_input_dir = gcs_input_dir
         }
 
         # 1 - filter the reads by the minimum read quality:
-        call Utils.Bamtools as FilterS2EByMinReadQuality {
+        call Utils.Bamtools as t_09_FilterS2EByMinReadQuality {
             input:
-                bamfile = RemoveKineticsTags.bam_file,
+                bamfile = t_07_RemoveKineticsTags.bam_file,
                 prefix = fbmrq_prefix + "_good_reads",
                 cmd = "filter",
                 args = '-tag "rq":">=' + min_read_quality + '"',
@@ -199,9 +199,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # 1.5 - Get the "rejected" reads:
-        call Utils.Bamtools as GetS2ERCcsRejectedReads {
+        call Utils.Bamtools as t_10_GetS2ERCcsRejectedReads {
             input:
-                bamfile = RemoveKineticsTags.bam_file,
+                bamfile = t_07_RemoveKineticsTags.bam_file,
                 prefix = fbmrq_prefix + "_rejected_reads",
                 cmd = "filter",
                 args = '-tag "rq":"<' + min_read_quality + '"',
@@ -209,35 +209,35 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # 2 - Get reads we can reclaim:
-        call Utils.Bamtools as ExtractS2ECcsReclaimableReads {
+        call Utils.Bamtools as t_11_ExtractS2ECcsReclaimableReads {
             input:
-                bamfile = RemoveKineticsTags.bam_file,
+                bamfile = t_07_RemoveKineticsTags.bam_file,
                 prefix = fbmrq_prefix + "_reads_for_ccs_reclamation",
                 cmd = "filter",
                 args = '-tag "rq":"<' + min_read_quality + '" -length "<=' + max_reclamation_length + '"',
                 runtime_attr_override = disable_preemption_runtime_attrs
         }
 
-        if ( ! CheckForAnnotatedArrayReads.bam_has_annotations ) {
+        if ( ! t_05_CheckForAnnotatedReads.bam_has_annotations ) {
             # 3: Longbow annotate ccs reads
-            call LONGBOW.Annotate as AnnotateS2ECCSReads {
+            call LONGBOW.Annotate as t_12_AnnotateS2ECCSReads {
                 input:
-                    reads = FilterS2EByMinReadQuality.bam_out,
+                    reads = t_09_FilterS2EByMinReadQuality.bam_out,
                     model = mas_seq_model
             }
             # 4: Longbow annotate reclaimable reads
-            call LONGBOW.Annotate as AnnotateS2EReclaimableReads {
+            call LONGBOW.Annotate as t_13_AnnotateS2EReclaimableReads {
                 input:
-                    reads = ExtractS2ECcsReclaimableReads.bam_out,
+                    reads = t_11_ExtractS2ECcsReclaimableReads.bam_out,
                     model = mas_seq_model
             }
         }
 
-        File annotated_S2E_ccs_file = if CheckForAnnotatedArrayReads.bam_has_annotations then FilterS2EByMinReadQuality.bam_out else select_first([AnnotateS2ECCSReads.annotated_bam])
-        File annotated_S2E_reclaimable_file = if CheckForAnnotatedArrayReads.bam_has_annotations then ExtractS2ECcsReclaimableReads.bam_out else select_first([AnnotateS2EReclaimableReads.annotated_bam])
+        File annotated_S2E_ccs_file = if t_05_CheckForAnnotatedReads.bam_has_annotations then t_09_FilterS2EByMinReadQuality.bam_out else select_first([t_12_AnnotateS2ECCSReads.annotated_bam])
+        File annotated_S2E_reclaimable_file = if t_05_CheckForAnnotatedReads.bam_has_annotations then t_11_ExtractS2ECcsReclaimableReads.bam_out else select_first([t_13_AnnotateS2EReclaimableReads.annotated_bam])
 
         # 5: Longbow filter ccs annotated reads
-        call LONGBOW.Filter as FilterS2ECCSReads {
+        call LONGBOW.Filter as t_14_FilterS2ECCSReads {
             input:
                 bam = annotated_S2E_ccs_file,
                 prefix = SM + "_subshard",
@@ -245,7 +245,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # 6: Longbow filter ccs reclaimable reads
-        call LONGBOW.Filter as FilterS2EReclaimableReads {
+        call LONGBOW.Filter as t_15_FilterS2EReclaimableReads {
             input:
                 bam = annotated_S2E_reclaimable_file,
                 prefix = SM + "_subshard",
@@ -253,61 +253,61 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # 7: Merge reclaimed and ccs longbow filtered reads
-        call Utils.MergeBams as MergeLongbowS2EPassedReads {
+        call Utils.MergeBams as t_16_MergeLongbowS2EPassedReads {
             input:
-                bams = [FilterS2ECCSReads.passed_reads, FilterS2EReclaimableReads.passed_reads],
+                bams = [t_14_FilterS2ECCSReads.passed_reads, t_15_FilterS2EReclaimableReads.passed_reads],
                 prefix = SM + "_LongbowFilter_Failed_1"
         }
-        call Utils.MergeBams as MergeLongbowS2EFailedReads {
+        call Utils.MergeBams as t_17_MergeLongbowS2EFailedReads {
             input:
-                bams = [FilterS2ECCSReads.failed_reads, FilterS2EReclaimableReads.failed_reads],
+                bams = [t_14_FilterS2ECCSReads.failed_reads, t_15_FilterS2EReclaimableReads.failed_reads],
                 prefix = SM + "_LongbowFilter_Failed_1"
         }
 
         # 8: PBIndex reads
-        call PB.PBIndex as PbIndexS2ELongbowPassedReads {
+        call PB.PBIndex as t_18_PbIndexS2ELongbowPassedReads {
             input:
-                bam = MergeLongbowS2EPassedReads.merged_bam
+                bam = t_16_MergeLongbowS2EPassedReads.merged_bam
         }
 
         # 9: Get CCS Reclaimed array elements for further study:
-        call PB.PBIndex as PbIndexS2ECcsReclaimedReads {
+        call PB.PBIndex as t_19_PbIndexS2ECcsReclaimedReads {
             input:
-                bam = FilterS2EReclaimableReads.passed_reads
+                bam = t_15_FilterS2EReclaimableReads.passed_reads
         }
-        call PB.ShardLongReads as ShardS2ECcsReclaimedReads {
+        call PB.ShardLongReads as t_20_ShardS2ECcsReclaimedReads {
             input:
-                unaligned_bam = FilterS2EReclaimableReads.passed_reads,
-                unaligned_pbi = PbIndexS2ECcsReclaimedReads.pbindex,
+                unaligned_bam = t_15_FilterS2EReclaimableReads.passed_reads,
+                unaligned_pbi = t_19_PbIndexS2ECcsReclaimedReads.pbindex,
                 prefix = SM + "_ccs_reclaimed_reads_subshard",
                 num_shards = 10,
         }
-        scatter (s2e_ccs_reclaimed_shard in ShardS2ECcsReclaimedReads.unmapped_shards) {
-            call LONGBOW.Segment as SegmentS2ECcsReclaimedReads {
+        scatter (s2e_ccs_reclaimed_shard in t_20_ShardS2ECcsReclaimedReads.unmapped_shards) {
+            call LONGBOW.Segment as t_21_SegmentS2ECcsReclaimedReads {
                 input:
                     annotated_reads = s2e_ccs_reclaimed_shard,
                     prefix = SM + "_ccs_reclaimed_array_elements_subshard",
                     model = mas_seq_model
             }
         }
-        call Utils.MergeBams as MergeS2ECcsReclaimedArrayElementSubshards {
-        input:
-            bams = SegmentS2ECcsReclaimedReads.segmented_bam,
-            prefix = SM + "_ccs_reclaimed_array_elements_shard"
+        call Utils.MergeBams as t_22_MergeS2ECcsReclaimedArrayElementSubshards {
+            input:
+                bams = t_21_SegmentS2ECcsReclaimedReads.segmented_bam,
+                prefix = SM + "_ccs_reclaimed_array_elements_shard"
         }
 
         # Shard these reads even wider so we can make sure we don't run out of memory:
-        call PB.ShardLongReads as ShardCorrectedReads {
+        call PB.ShardLongReads as t_23_ShardCorrectedReads {
             input:
-                unaligned_bam = MergeLongbowS2EPassedReads.merged_bam,
-                unaligned_pbi = PbIndexS2ELongbowPassedReads.pbindex,
+                unaligned_bam = t_16_MergeLongbowS2EPassedReads.merged_bam,
+                unaligned_pbi = t_18_PbIndexS2ELongbowPassedReads.pbindex,
                 prefix = SM + "_longbow_all_passed_subshard",
                 num_shards = 10,
         }
 
         # Segment our arrays into individual array elements:
-        scatter (corrected_shard in ShardCorrectedReads.unmapped_shards) {
-            call LONGBOW.Segment as SegmentAnnotatedReads {
+        scatter (corrected_shard in t_23_ShardCorrectedReads.unmapped_shards) {
+            call LONGBOW.Segment as t_24_SegmentAnnotatedReads {
                 input:
                     annotated_reads = corrected_shard,
                     model = mas_seq_model
@@ -315,9 +315,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # Merge all outputs of Longbow Annotate / Segment:
-        call Utils.MergeBams as MergeArrayElements_1 {
+        call Utils.MergeBams as t_25_MergeArrayElements_1 {
             input:
-                bams = SegmentAnnotatedReads.segmented_bam,
+                bams = t_24_SegmentAnnotatedReads.segmented_bam,
                 prefix = SM + "_ArrayElements_intermediate_1"
         }
     }
@@ -327,26 +327,26 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     # At this point we must merge all our files together again so we can annotate the CBCs with the 10x tool:
     # Merge all outputs of Longbow Annotate / Segment:
-    call Utils.MergeBams as MergeArrayElementsForBarcoding {
+    call Utils.MergeBams as t_26_MergeArrayElementsForBarcoding {
         input:
-            bams = MergeArrayElements_1.merged_bam,
+            bams = t_25_MergeArrayElements_1.merged_bam,
             prefix = SM + "_ArrayElements_intermediate_1",
             runtime_attr_override = fast_network_attrs
     }
 
     # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
     if (is_SIRV_data) {
-        call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
+        call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement as t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
             input:
-                bam_file = MergeArrayElementsForBarcoding.merged_bam,
+                bam_file = t_26_MergeArrayElementsForBarcoding.merged_bam,
                 prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
         }
     }
     if ( ! is_SIRV_data ) {
-        call TENX.AnnotateBarcodesAndUMIs as TenxAnnotateArrayElements {
+        call TENX.AnnotateBarcodesAndUMIs as t_28_TenxAnnotateArrayElements {
             input:
-                bam_file = MergeArrayElementsForBarcoding.merged_bam,
-                bam_index = MergeArrayElementsForBarcoding.merged_bai,
+                bam_file = t_26_MergeArrayElementsForBarcoding.merged_bam,
+                bam_index = t_26_MergeArrayElementsForBarcoding.merged_bai,
                 head_adapter_fasta = head_adapter_fasta,
                 tail_adapter_fasta = tail_adapter_fasta,
                 whitelist_10x = ten_x_cell_barcode_whitelist,
@@ -362,8 +362,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
     # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
     # output to `File?` instead of `File`
-    File annotated_array_elements = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
-    call PB.PBIndex as PbIndexAnnotatedArrayElements {
+    File annotated_array_elements = if is_SIRV_data then select_first([t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([t_28_TenxAnnotateArrayElements.output_bam])
+    call PB.PBIndex as t_29_PbIndexAnnotatedArrayElements {
         input:
             bam = annotated_array_elements,
             runtime_attr_override = fast_network_attrs
@@ -373,19 +373,19 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     ############################################################################################################
     # Now we can re-shard our array elements for extraction, alignment and labeling:
 
-    call PB.ShardLongReads as ShardArrayElements {
+    call PB.ShardLongReads as t_30_ShardArrayElements {
         input:
-            unaligned_bam = reads_bam,
-            unaligned_pbi = read_pbi,
-            prefix = SM + "_shard",
+            unaligned_bam = annotated_array_elements,
+            unaligned_pbi = t_29_PbIndexAnnotatedArrayElements.pbindex,
+            prefix = SM + "_ArrayElements_shard",
             num_shards = 300,
     }
 
-    scatter (sharded_array_elements in ShardArrayElements.unmapped_shards) {
+    scatter (sharded_array_elements in t_30_ShardArrayElements.unmapped_shards) {
 
         # Grab only the coding regions of the annotated reads for our alignments:
         Int extract_start_offset = if is_SIRV_data then 8 else 26
-        call LONGBOW.Extract as ExtractCodingRegionsFromArrayElements {
+        call LONGBOW.Extract as t_31_ExtractCodingRegionsFromArrayElements {
             input:
                 bam = sharded_array_elements,
                 start_offset = extract_start_offset,
@@ -393,34 +393,34 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
 
         # Align our array elements:
-        call AR.Minimap2 as AlignArrayElements {
+        call AR.Minimap2 as t_32_AlignArrayElementsToTranscriptome {
             input:
-                reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
+                reads      = [ t_31_ExtractCodingRegionsFromArrayElements.extracted_reads ],
                 ref_fasta  = transcriptome_ref_fasta,
                 map_preset = "splice:hq"
         }
 
-        call AR.Minimap2 as AlignArrayElementsToGenome {
+        call AR.Minimap2 as t_33_AlignArrayElementsToGenome {
             input:
-                reads      = [ ExtractCodingRegionsFromArrayElements.extracted_reads ],
+                reads      = [ t_31_ExtractCodingRegionsFromArrayElements.extracted_reads ],
                 ref_fasta  = ref_fasta,
                 map_preset = "splice:hq"
         }
 
         # We need to restore the annotations we created with the 10x tool to the aligned reads.
-        call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToTranscriptomeAlignedBam {
+        call TENX.RestoreAnnotationstoAlignedBam as t_34_RestoreAnnotationsToTranscriptomeAlignedBam {
             input:
-                annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
-                aligned_bam_file = AlignArrayElements.aligned_bam,
+                annotated_bam_file = t_31_ExtractCodingRegionsFromArrayElements.extracted_reads,
+                aligned_bam_file = t_32_AlignArrayElementsToTranscriptome.aligned_bam,
                 tags_to_ignore = [],
                 mem_gb = 64,  # TODO: Debug for memory redution
         }
 
         # We need to restore the annotations we created with the 10x tool to the aligned reads.
-        call TENX.RestoreAnnotationstoAlignedBam as RestoreAnnotationsToGenomeAlignedBam {
+        call TENX.RestoreAnnotationstoAlignedBam as t_35_RestoreAnnotationsToGenomeAlignedBam {
             input:
-                annotated_bam_file = ExtractCodingRegionsFromArrayElements.extracted_reads,
-                aligned_bam_file = AlignArrayElementsToGenome.aligned_bam,
+                annotated_bam_file = t_31_ExtractCodingRegionsFromArrayElements.extracted_reads,
+                aligned_bam_file = t_33_AlignArrayElementsToGenome.aligned_bam,
                 tags_to_ignore = [],
                 mem_gb = 64,  # TODO: Debug for memory redution
         }
@@ -430,18 +430,18 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             cpu_cores: 4,
             preemptible_tries: 0
         }
-        call Utils.FilterReadsBySamFlags as RemoveUnmappedAndNonPrimaryReads {
+        call Utils.FilterReadsBySamFlags as t_36_RemoveUnmappedAndNonPrimaryReads {
             input:
-                bam = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam,
+                bam = t_34_RestoreAnnotationsToTranscriptomeAlignedBam.output_bam,
                 sam_flags = "2308",
                 prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly",
                 runtime_attr_override = filterReadsAttrs
         }
 
         # Filter reads with no UMI tag:
-        call Utils.FilterReadsWithTagValues as FilterReadsWithNoUMI {
+        call Utils.FilterReadsWithTagValues as t_37_FilterReadsWithNoUMI {
             input:
-                bam = RemoveUnmappedAndNonPrimaryReads.output_bam,
+                bam = t_36_RemoveUnmappedAndNonPrimaryReads.output_bam,
                 tag = "ZU",
                 value_to_remove = ".",
                 prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs",
@@ -451,9 +451,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         # Copy the contig to a tag.
         # By this point in the pipeline, array elements are aligned to a transcriptome, so this tag will
         # actually indicate the transcript to which each array element aligns.
-        call TENX.CopyContigNameToReadTag {
+        call TENX.CopyContigNameToReadTag as t_38_CopyContigNameToReadTag {
             input:
-                aligned_bam_file = FilterReadsWithNoUMI.output_bam,
+                aligned_bam_file = t_37_FilterReadsWithNoUMI.output_bam,
                 prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs"
         }
     }
@@ -472,63 +472,63 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     # Sequel IIe Data.
     # CCS Passed:
-    call Utils.MergeBams as MergeCCSRqFilteredReads { input: bams = FilterS2EByMinReadQuality.bam_out, prefix = SM + "_ccs_reads" }
-    call Utils.MergeBams as MergeCCSRqRejectedReads { input: bams = GetS2ERCcsRejectedReads.bam_out, prefix = SM + "_ccs_rejected_reads" }
-    call Utils.MergeBams as MergeAnnotatedCCSReads_S2e { input: bams = annotated_S2E_ccs_file, prefix = SM + "_ccs_reads_annotated" }
-    call Utils.MergeBams as MergeLongbowPassedCCSReads_S2e { input: bams = FilterS2ECCSReads.passed_reads, prefix = SM + "_ccs_reads_annotated_longbow_passed" }
-    call Utils.MergeBams as MergeLongbowFailedCCSReads_S2e { input: bams = FilterS2ECCSReads.failed_reads, prefix = SM + "_ccs_reads_annotated_longbow_failed" }
+    call Utils.MergeBams as t_39_MergeCCSRqFilteredReads { input: bams = t_09_FilterS2EByMinReadQuality.bam_out, prefix = SM + "_ccs_reads" }
+    call Utils.MergeBams as t_40_MergeCCSRqRejectedReads { input: bams = t_10_GetS2ERCcsRejectedReads.bam_out, prefix = SM + "_ccs_rejected_reads" }
+    call Utils.MergeBams as t_41_MergeAnnotatedCCSReads_S2e { input: bams = annotated_S2E_ccs_file, prefix = SM + "_ccs_reads_annotated" }
+    call Utils.MergeBams as t_42_MergeLongbowPassedCCSReads_S2e { input: bams = t_14_FilterS2ECCSReads.passed_reads, prefix = SM + "_ccs_reads_annotated_longbow_passed" }
+    call Utils.MergeBams as t_43_MergeLongbowFailedCCSReads_S2e { input: bams = t_14_FilterS2ECCSReads.failed_reads, prefix = SM + "_ccs_reads_annotated_longbow_failed" }
 
     # CCS Failed / Reclaimable:
-    call Utils.MergeBams as MergeCCSReclaimableReads_S2e { input: bams = ExtractS2ECcsReclaimableReads.bam_out, prefix = SM + "_ccs_rejected_reclaimable" }
-    call Utils.MergeBams as MergeCCSReclaimableAnnotatedReads_S2e { input: bams = annotated_S2E_reclaimable_file, prefix = SM + "_ccs_rejected_reclaimable_annotated" }
-    call Utils.MergeBams as MergeLongbowPassedReclaimable_S2e { input: bams = FilterS2EReclaimableReads.passed_reads, prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_passed" }
-    call Utils.MergeBams as MergeLongbowFailedReclaimable_S2e { input: bams = FilterS2EReclaimableReads.failed_reads, prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_failed" }
+    call Utils.MergeBams as t_44_MergeCCSReclaimableReads_S2e { input: bams = t_11_ExtractS2ECcsReclaimableReads.bam_out, prefix = SM + "_ccs_rejected_reclaimable" }
+    call Utils.MergeBams as t_45_MergeCCSReclaimableAnnotatedReads_S2e { input: bams = annotated_S2E_reclaimable_file, prefix = SM + "_ccs_rejected_reclaimable_annotated" }
+    call Utils.MergeBams as t_46_MergeLongbowPassedReclaimable_S2e { input: bams = t_15_FilterS2EReclaimableReads.passed_reads, prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_passed" }
+    call Utils.MergeBams as t_47_MergeLongbowFailedReclaimable_S2e { input: bams = t_15_FilterS2EReclaimableReads.failed_reads, prefix = SM + "_ccs_rejected_reclaimable_annotated_longbow_failed" }
 
     # All Longbow Passed / Failed reads:
-    call Utils.MergeBams as MergeAllLongbowPassedReads_S2e { input: bams = MergeLongbowS2EPassedReads.merged_bam, prefix = SM + "_all_longbow_passed" }
-    call Utils.MergeBams as MergeAllLongbowFailedReads_S2e { input: bams = MergeLongbowS2EFailedReads.merged_bam, prefix = SM + "_all_longbow_failed" }
+    call Utils.MergeBams as t_48_MergeAllLongbowPassedReads_S2e { input: bams = t_16_MergeLongbowS2EPassedReads.merged_bam, prefix = SM + "_all_longbow_passed" }
+    call Utils.MergeBams as t_49_MergeAllLongbowFailedReads_S2e { input: bams = t_17_MergeLongbowS2EFailedReads.merged_bam, prefix = SM + "_all_longbow_failed" }
 
     # Merge CCS Reclaimed Array elements:
-    call Utils.MergeBams as MergeCCSReclaimedArrayElements_S2e { input: bams = MergeS2ECcsReclaimedArrayElementSubshards.merged_bam, prefix = SM + "_ccs_reclaimed_array_elements"  }
+    call Utils.MergeBams as t_50_MergeCCSReclaimedArrayElements_S2e { input: bams = t_22_MergeS2ECcsReclaimedArrayElementSubshards.merged_bam, prefix = SM + "_ccs_reclaimed_array_elements"  }
 
 
     # Alias out the data we need to pass into stuff later:
-    File ccs_corrected_reads = MergeCCSRqFilteredReads.merged_bam
-    File ccs_corrected_reads_index = MergeCCSRqFilteredReads.merged_bai
-    File ccs_rejected_reads = MergeCCSRqRejectedReads.merged_bam
-    File ccs_rejected_reads_index = MergeCCSRqRejectedReads.merged_bai
-    File annotated_ccs_reads = MergeAnnotatedCCSReads_S2e.merged_bam
-    File annotated_ccs_reads_index = MergeAnnotatedCCSReads_S2e.merged_bai
-    File longbow_passed_ccs_reads = MergeLongbowPassedCCSReads_S2e.merged_bam
-    File longbow_passed_ccs_reads_index = MergeLongbowPassedCCSReads_S2e.merged_bai
-    File longbow_failed_ccs_reads = MergeLongbowFailedCCSReads_S2e.merged_bam
-    File longbow_failed_ccs_reads_index = MergeLongbowFailedCCSReads_S2e.merged_bai
-    File ccs_reclaimable_reads = MergeCCSReclaimableReads_S2e.merged_bam
-    File ccs_reclaimable_reads_index = MergeCCSReclaimableReads_S2e.merged_bai
+    File ccs_corrected_reads = t_39_MergeCCSRqFilteredReads.merged_bam
+    File ccs_corrected_reads_index = t_39_MergeCCSRqFilteredReads.merged_bai
+    File ccs_rejected_reads = t_40_MergeCCSRqRejectedReads.merged_bam
+    File ccs_rejected_reads_index = t_40_MergeCCSRqRejectedReads.merged_bai
+    File annotated_ccs_reads = t_41_MergeAnnotatedCCSReads_S2e.merged_bam
+    File annotated_ccs_reads_index = t_41_MergeAnnotatedCCSReads_S2e.merged_bai
+    File longbow_passed_ccs_reads = t_42_MergeLongbowPassedCCSReads_S2e.merged_bam
+    File longbow_passed_ccs_reads_index = t_42_MergeLongbowPassedCCSReads_S2e.merged_bai
+    File longbow_failed_ccs_reads = t_43_MergeLongbowFailedCCSReads_S2e.merged_bam
+    File longbow_failed_ccs_reads_index = t_43_MergeLongbowFailedCCSReads_S2e.merged_bai
+    File ccs_reclaimable_reads = t_44_MergeCCSReclaimableReads_S2e.merged_bam
+    File ccs_reclaimable_reads_index = t_44_MergeCCSReclaimableReads_S2e.merged_bai
     
-    File annotated_ccs_reclaimable_reads = MergeCCSReclaimableAnnotatedReads_S2e.merged_bam
+    File annotated_ccs_reclaimable_reads = t_45_MergeCCSReclaimableAnnotatedReads_S2e.merged_bam
     
-    File annotated_ccs_reclaimable_reads_index = MergeCCSReclaimableAnnotatedReads_S2e.merged_bai
-    File ccs_reclaimed_reads = MergeLongbowPassedReclaimable_S2e.merged_bam
-    File ccs_reclaimed_reads_index = MergeLongbowPassedReclaimable_S2e.merged_bai
-    File longbow_failed_ccs_unreclaimable_reads = MergeLongbowFailedReclaimable_S2e.merged_bam
-    File longbow_failed_ccs_unreclaimable_reads_index = MergeLongbowFailedReclaimable_S2e.merged_bai
-    File longbow_passed_reads = MergeAllLongbowPassedReads_S2e.merged_bam
-    File longbow_passed_reads_index = MergeAllLongbowPassedReads_S2e.merged_bai
-    File longbow_failed_reads = MergeAllLongbowFailedReads_S2e.merged_bam
-    File longbow_failed_reads_index = MergeAllLongbowFailedReads_S2e.merged_bai
+    File annotated_ccs_reclaimable_reads_index = t_45_MergeCCSReclaimableAnnotatedReads_S2e.merged_bai
+    File ccs_reclaimed_reads = t_46_MergeLongbowPassedReclaimable_S2e.merged_bam
+    File ccs_reclaimed_reads_index = t_46_MergeLongbowPassedReclaimable_S2e.merged_bai
+    File longbow_failed_ccs_unreclaimable_reads = t_47_MergeLongbowFailedReclaimable_S2e.merged_bam
+    File longbow_failed_ccs_unreclaimable_reads_index = t_47_MergeLongbowFailedReclaimable_S2e.merged_bai
+    File longbow_passed_reads = t_48_MergeAllLongbowPassedReads_S2e.merged_bam
+    File longbow_passed_reads_index = t_48_MergeAllLongbowPassedReads_S2e.merged_bai
+    File longbow_failed_reads = t_49_MergeAllLongbowFailedReads_S2e.merged_bam
+    File longbow_failed_reads_index = t_49_MergeAllLongbowFailedReads_S2e.merged_bai
 
-    File ccs_reclaimed_array_elements = MergeCCSReclaimedArrayElements_S2e.merged_bam
-    File ccs_reclaimed_array_elements_index = MergeCCSReclaimedArrayElements_S2e.merged_bai
+    File ccs_reclaimed_array_elements = t_50_MergeCCSReclaimedArrayElements_S2e.merged_bam
+    File ccs_reclaimed_array_elements_index = t_50_MergeCCSReclaimedArrayElements_S2e.merged_bai
 
     # Merge all CCS bams together for this Subread BAM:
     RuntimeAttr merge_extra_cpu_attrs = object {
         cpu_cores: 4
     }
-    call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
-    call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
-    call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned", runtime_attr_override = merge_extra_cpu_attrs }
-    call Utils.MergeBams as MergePrimaryTranscriptomeAlignedArrayElements { input: bams = CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as t_51_MergeLongbowExtractedArrayElements { input: bams = t_31_ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
+    call Utils.MergeBams as t_52_MergeTranscriptomeAlignedExtractedArrayElements { input: bams = t_34_RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as t_53_MergeGenomeAlignedExtractedArrayElements { input: bams = t_35_RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as t_54_MergePrimaryTranscriptomeAlignedArrayElements { input: bams = t_38_CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments", runtime_attr_override = merge_extra_cpu_attrs }
 
     # NEW PB INDEXING IS BEING DIFFICULT.  REMOVED FOR NOW.
 #    # PbIndex some key files:
@@ -547,7 +547,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         max_retries:        1,
         docker:             "us.gcr.io/broad-dsp-lrma/lr-metrics:0.1.8"
     }
-    call AM.SamtoolsStats as CalcSamStatsOnInputBam {
+    call AM.SamtoolsStats as t_55_CalcSamStatsOnInputBam {
         input:
             bam = reads_bam,
             runtime_attr_override = subreads_sam_stats_runtime_attrs
@@ -557,25 +557,25 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     # Quantify Transcripts:
     ##########
 
-    call UMI_TOOLS.Run_Group as UMIToolsGroup {
+    call UMI_TOOLS.Run_Group as t_56_UMIToolsGroup {
         input:
-            aligned_transcriptome_reads = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
-            aligned_transcriptome_reads_index = MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
+            aligned_transcriptome_reads = t_54_MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
+            aligned_transcriptome_reads_index = t_54_MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
             do_per_cell = !is_SIRV_data,
             prefix = "~{SM}_~{ID}_umi_tools_group"
     }
 
-    call TX_POST.CreateCountMatrixFromAnnotatedBam {
+    call TX_POST.CreateCountMatrixFromAnnotatedBam as t_57_CreateCountMatrixFromAnnotatedBam {
         input:
-            annotated_transcriptome_bam = UMIToolsGroup.output_bam,
+            annotated_transcriptome_bam = t_56_UMIToolsGroup.output_bam,
             prefix = "~{SM}_~{ID}_gene_tx_expression_count_matrix"
     }
 
     # Only create the anndata objects if we're looking at real genomic data:
     if ( ! is_SIRV_data ) {
-        call TX_POST.CreateCountMatrixAnndataFromTsv {
+        call TX_POST.CreateCountMatrixAnndataFromTsv as t_58_CreateCountMatrixAnndataFromTsv {
             input:
-                count_matrix_tsv = CreateCountMatrixFromAnnotatedBam.count_matrix,
+                count_matrix_tsv = t_57_CreateCountMatrixFromAnnotatedBam.count_matrix,
                 gencode_gtf_file = genome_annotation_gtf,
                 prefix = "~{SM}_~{ID}_gene_tx_expression_count_matrix"
         }
@@ -590,31 +590,31 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     #
     ############################################################
 
-    String base_out_dir = outdir + "/" + DIR + "/" + WdlExecutionStartTimestamp.timestamp_string
+    String base_out_dir = outdir + "/" + DIR + "/" + t_01_WdlExecutionStartTimestamp.timestamp_string
     String metrics_out_dir = base_out_dir + "/metrics"
 
     # Aligned CCS Metrics:
-    call RM.CalculateAndFinalizeReadMetrics as GenomeAlignedArrayElementMetrics {
+    call RM.CalculateAndFinalizeReadMetrics as t_59_GenomeAlignedArrayElementMetrics {
         input:
-            bam_file = MergeGenomeAlignedExtractedArrayElements.merged_bam,
-            bam_index = MergeGenomeAlignedExtractedArrayElements.merged_bai,
+            bam_file = t_53_MergeGenomeAlignedExtractedArrayElements.merged_bam,
+            bam_index = t_53_MergeGenomeAlignedExtractedArrayElements.merged_bai,
             ref_dict = ref_fasta_dict,
 
             base_metrics_out_dir = metrics_out_dir + "/genome_aligned_array_element_metrics"
     }
 
     # Aligned Array Element Metrics:
-    call RM.CalculateAndFinalizeAlternateReadMetrics as TranscriptomeAlignedArrayElementMetrics {
+    call RM.CalculateAndFinalizeAlternateReadMetrics as t_60_TranscriptomeAlignedArrayElementMetrics {
         input:
-            bam_file = MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
-            bam_index = MergeTranscriptomeAlignedExtractedArrayElements.merged_bai,
+            bam_file = t_52_MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+            bam_index = t_52_MergeTranscriptomeAlignedExtractedArrayElements.merged_bai,
             ref_dict = transcriptome_ref_fasta_dict,
 
             base_metrics_out_dir = metrics_out_dir + "/transcriptome_aligned_array_element_metrics"
     }
 
     # We should have exactly 1 CCS report for Sequel IIe reads:
-    File final_ccs_report = FindCCSReport.ccs_report[0]
+    File final_ccs_report = t_08_FindCCSReport.ccs_report[0]
 
     ##########################################################################################
     #         ____                _                ____                       _
@@ -628,20 +628,20 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     RuntimeAttr create_report_runtime_attrs = object {
             preemptible_tries:  0
     }
-    call JUPYTER.PB10xMasSeqSingleFlowcellReport as GenerateStaticReport {
+    call JUPYTER.PB10xMasSeqSingleFlowcellReport as t_61_GenerateStaticReport {
         input:
             notebook_template                 = jupyter_template_static,
 
             sample_name                       = SM,
 
-            subreads_stats                    = CalcSamStatsOnInputBam.raw_stats,
-            ccs_reads_stats                   = GenomeAlignedArrayElementMetrics.sam_stats_raw_stats,
-            array_elements_stats              = TranscriptomeAlignedArrayElementMetrics.sam_stats_raw_stats,
+            subreads_stats                    = t_55_CalcSamStatsOnInputBam.raw_stats,
+            ccs_reads_stats                   = t_59_GenomeAlignedArrayElementMetrics.sam_stats_raw_stats,
+            array_elements_stats              = t_60_TranscriptomeAlignedArrayElementMetrics.sam_stats_raw_stats,
             ccs_report_file                   = final_ccs_report,
 
             raw_ccs_bam_file                  = ccs_corrected_reads,
-            array_element_bam_file            = MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
-            array_elements_genome_aligned     = MergeGenomeAlignedExtractedArrayElements.merged_bam,
+            array_element_bam_file            = t_52_MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+            array_elements_genome_aligned     = t_53_MergeGenomeAlignedExtractedArrayElements.merged_bam,
             ccs_rejected_bam_file             = ccs_rejected_reads,
 
             annotated_bam_file                = annotated_ccs_reads,
@@ -657,9 +657,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             raw_array_elements                = annotated_array_elements,
             ccs_reclaimed_array_elements      = ccs_reclaimed_array_elements,
 
-            zmw_stats_json_gz                 = FindZmwStatsJsonGz.zmw_stats_json_gz,
+            zmw_stats_json_gz                 = t_03_FindZmwStatsJsonGz.zmw_stats_json_gz,
 
-            ten_x_metrics_file                = TenxAnnotateArrayElements.stats,
+            ten_x_metrics_file                = t_28_TenxAnnotateArrayElements.stats,
             mas_seq_model                     = mas_seq_model,
 
             workflow_dot_file                 = workflow_dot_file,
@@ -687,20 +687,20 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
     ##############################################################################################################
     # Finalize the final annotated, aligned array elements:
-    call FF.FinalizeToDir as FinalizeQuantifiedArrayElements {
+    call FF.FinalizeToDir as t_62_FinalizeQuantifiedArrayElements {
         input:
             files = [
-                MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
-                MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
+                t_54_MergePrimaryTranscriptomeAlignedArrayElements.merged_bam,
+                t_54_MergePrimaryTranscriptomeAlignedArrayElements.merged_bai,
 #                PbIndexPrimaryTranscriptomeAlignedArrayElements.pbindex
             ],
             outdir = array_element_dir,
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 
     ##############################################################################################################
     # Finalize the intermediate reads files (from raw CCS corrected reads through split array elements)
-    call FF.FinalizeToDir as FinalizeArrayReads {
+    call FF.FinalizeToDir as t_63_FinalizeArrayReads {
         input:
             files = [
                 ccs_corrected_reads,
@@ -727,46 +727,46 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 longbow_failed_reads_index
             ],
             outdir = intermediate_reads_dir + "/array_bams",
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 
-    call FF.FinalizeToDir as FinalizeArrayElementReads {
+    call FF.FinalizeToDir as t_64_FinalizeArrayElementReads {
         input:
             files = [
                 annotated_array_elements,
-                MergeLongbowExtractedArrayElements.merged_bam,
-                MergeLongbowExtractedArrayElements.merged_bai,
-                MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
-                MergeTranscriptomeAlignedExtractedArrayElements.merged_bai,
-                MergeGenomeAlignedExtractedArrayElements.merged_bam,
-                MergeGenomeAlignedExtractedArrayElements.merged_bai,
+                t_51_MergeLongbowExtractedArrayElements.merged_bam,
+                t_51_MergeLongbowExtractedArrayElements.merged_bai,
+                t_52_MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
+                t_52_MergeTranscriptomeAlignedExtractedArrayElements.merged_bai,
+                t_53_MergeGenomeAlignedExtractedArrayElements.merged_bam,
+                t_53_MergeGenomeAlignedExtractedArrayElements.merged_bai,
             ],
             outdir = intermediate_reads_dir + "/array_element_bams",
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 
     ##############################################################################################################
     # Finalize Metrics:
-    call FF.FinalizeToDir as FinalizeSamStatsOnInputBam {
+    call FF.FinalizeToDir as t_65_FinalizeSamStatsOnInputBam {
         input:
             # an unfortunate hard-coded path here:
             outdir = metrics_out_dir + "/input_bam_stats",
             files = [
-                CalcSamStatsOnInputBam.raw_stats,
-                CalcSamStatsOnInputBam.summary_stats,
-                CalcSamStatsOnInputBam.first_frag_qual,
-                CalcSamStatsOnInputBam.last_frag_qual,
-                CalcSamStatsOnInputBam.first_frag_gc_content,
-                CalcSamStatsOnInputBam.last_frag_gc_content,
-                CalcSamStatsOnInputBam.acgt_content_per_cycle,
-                CalcSamStatsOnInputBam.insert_size,
-                CalcSamStatsOnInputBam.read_length_dist,
-                CalcSamStatsOnInputBam.indel_distribution,
-                CalcSamStatsOnInputBam.indels_per_cycle,
-                CalcSamStatsOnInputBam.coverage_distribution,
-                CalcSamStatsOnInputBam.gc_depth
+                t_55_CalcSamStatsOnInputBam.raw_stats,
+                t_55_CalcSamStatsOnInputBam.summary_stats,
+                t_55_CalcSamStatsOnInputBam.first_frag_qual,
+                t_55_CalcSamStatsOnInputBam.last_frag_qual,
+                t_55_CalcSamStatsOnInputBam.first_frag_gc_content,
+                t_55_CalcSamStatsOnInputBam.last_frag_gc_content,
+                t_55_CalcSamStatsOnInputBam.acgt_content_per_cycle,
+                t_55_CalcSamStatsOnInputBam.insert_size,
+                t_55_CalcSamStatsOnInputBam.read_length_dist,
+                t_55_CalcSamStatsOnInputBam.indel_distribution,
+                t_55_CalcSamStatsOnInputBam.indels_per_cycle,
+                t_55_CalcSamStatsOnInputBam.coverage_distribution,
+                t_55_CalcSamStatsOnInputBam.gc_depth
             ],
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 
     # Finalize all the 10x metrics here:
@@ -774,86 +774,86 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if (! is_SIRV_data) {
         String tenXToolMetricsDir = metrics_out_dir + "/ten_x_tool_metrics"
 
-        call FF.FinalizeToDir as FinalizeTenXRgStats {
+        call FF.FinalizeToDir as t_66_FinalizeTenXRgStats {
             input:
                 files = select_all([
-                    TenxAnnotateArrayElements.barcode_stats,
-                    TenxAnnotateArrayElements.starcode,
-                    TenxAnnotateArrayElements.stats,
-                    TenxAnnotateArrayElements.raw_starcode_counts,
-                    TenxAnnotateArrayElements.timing_info
+                    t_28_TenxAnnotateArrayElements.barcode_stats,
+                    t_28_TenxAnnotateArrayElements.starcode,
+                    t_28_TenxAnnotateArrayElements.stats,
+                    t_28_TenxAnnotateArrayElements.raw_starcode_counts,
+                    t_28_TenxAnnotateArrayElements.timing_info
                 ]),
                 outdir = tenXToolMetricsDir,
-                keyfile = GenerateStaticReport.html_report
+                keyfile = t_61_GenerateStaticReport.html_report
         }
-        call FF.FinalizeToDir as FinalizeTenXOverallStats {
+        call FF.FinalizeToDir as t_67_FinalizeTenXOverallStats {
             input:
                 files = [
-                    select_first([TenxAnnotateArrayElements.stats])
+                    select_first([t_28_TenxAnnotateArrayElements.stats])
                 ],
                 outdir = tenXToolMetricsDir,
-                keyfile = GenerateStaticReport.html_report
+                keyfile = t_61_GenerateStaticReport.html_report
         }
     }
 
-    call FF.FinalizeToDir as FinalizeCCSMetrics {
+    call FF.FinalizeToDir as t_68_FinalizeCCSMetrics {
         input:
             files = [ final_ccs_report ],
             outdir = metrics_out_dir + "/ccs_metrics",
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 
     ##############################################################################################################
     # Finalize all the Quantification data:
-    call FF.FinalizeToDir as FinalizeQuantResults {
+    call FF.FinalizeToDir as t_69_FinalizeQuantResults {
         input:
             files = [
-                UMIToolsGroup.output_bam,
-                UMIToolsGroup.output_tsv,
-                CreateCountMatrixFromAnnotatedBam.count_matrix
+                t_56_UMIToolsGroup.output_bam,
+                t_56_UMIToolsGroup.output_tsv,
+                t_57_CreateCountMatrixFromAnnotatedBam.count_matrix
             ],
             outdir = quant_dir,
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
     # Finalize our anndata objects if we have them:
     if ( ! is_SIRV_data ) {
-        call FF.FinalizeToDir as FinalizeProcessedQuantResults {
+        call FF.FinalizeToDir as t_70_FinalizeProcessedQuantResults {
             input:
                 files = select_all([
-                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_pickle,
-                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_pickle,
-                    CreateCountMatrixAnndataFromTsv.gene_count_anndata_h5ad,
-                    CreateCountMatrixAnndataFromTsv.transcript_count_anndata_h5ad,
+                    t_58_CreateCountMatrixAnndataFromTsv.gene_count_anndata_pickle,
+                    t_58_CreateCountMatrixAnndataFromTsv.transcript_count_anndata_pickle,
+                    t_58_CreateCountMatrixAnndataFromTsv.gene_count_anndata_h5ad,
+                    t_58_CreateCountMatrixAnndataFromTsv.transcript_count_anndata_h5ad,
                 ]),
                 outdir = quant_dir,
-                keyfile = GenerateStaticReport.html_report
+                keyfile = t_61_GenerateStaticReport.html_report
         }
     }
 
     ##############################################################################################################
     # Finalize the report:
-    call FF.FinalizeToDir as FinalizeStaticReport {
+    call FF.FinalizeToDir as t_71_FinalizeStaticReport {
         input:
             files = [
-                GenerateStaticReport.populated_notebook,
-                GenerateStaticReport.html_report,
+                t_61_GenerateStaticReport.populated_notebook,
+                t_61_GenerateStaticReport.html_report,
             ],
             outdir = report_dir,
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 
-    call FF.FinalizeTarGzContents as FinalizeReportFigures {
+    call FF.FinalizeTarGzContents as t_72_FinalizeReportFigures {
         input:
-            tar_gz_file = GenerateStaticReport.figures_tar_gz,
+            tar_gz_file = t_61_GenerateStaticReport.figures_tar_gz,
             outdir = report_dir,
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 
     ##############################################################################################################
     # Write out completion file so in the future we can be 100% sure that this run was good:
-    call FF.WriteCompletionFile {
+    call FF.WriteCompletionFile as t_73_WriteCompletionFile {
         input:
             outdir = base_out_dir + "/",
-            keyfile = GenerateStaticReport.html_report
+            keyfile = t_61_GenerateStaticReport.html_report
     }
 }
