@@ -664,7 +664,7 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
                         # Get our conf factor and round it to the nearest int:
                         cf_raw = get_confidence_factor_raw_quals(barcode_base_quals)
                         conf_factor = int(np.round(cf_raw))
-                        print(f"{read.query_name}: CF: {conf_factor} | {cf_raw}")
+                        # print(f"{read.query_name}: CF: {conf_factor} | {cf_raw}")
 
                         # Write our barcode and confidence factor:
                         barcode_count_file.write(f"{observed_barcode}\t{conf_factor}\n")
