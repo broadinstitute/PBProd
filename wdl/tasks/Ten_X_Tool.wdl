@@ -130,7 +130,7 @@ task AnnotateBarcodesAndUMIs {
 
     String output_name = basename(bam_file) + ".10x_annotated"
 
-    command {
+    command <<<
         set -e
         startTime=`date +%s.%N`
         echo "StartTime: $startTime" > ~{timing_output_file}
@@ -154,6 +154,10 @@ task AnnotateBarcodesAndUMIs {
         endTime=`date +%s.%N`
         echo "EndTime: $endTime" >> ~{timing_output_file}
 
+        if [ ! -e "${output_name}_starcode_confidence_factor_barcode_counts.tsv" ] ; then
+            touch ${output_name}_starcode_confidence_factor_barcode_counts.tsv
+        fi
+
         # Get and compute timing information:
         set +e
         elapsedTime=""
@@ -166,7 +170,7 @@ task AnnotateBarcodesAndUMIs {
         fi
         echo "Elapsed Time: $elapsedTime" >> ~{timing_output_file}
 
-    }
+    >>>
 
     #########################
     RuntimeAttr default_attr = object {
@@ -191,11 +195,12 @@ task AnnotateBarcodesAndUMIs {
 
 
     output {
-      File output_bam        = "${output_name}.bam"
-      File barcode_stats     = "${output_name}_barcode_stats.tsv"
-      File starcode          = "${output_name}_starcode.tsv"
-      File stats             = "${output_name}_stats.tsv"
-      File timing_info       = "${timing_output_file}"
+      File output_bam          = "${output_name}.bam"
+      File barcode_stats       = "${output_name}_barcode_stats.tsv"
+      File starcode            = "${output_name}_starcode.tsv"
+      File stats               = "${output_name}_stats.tsv"
+      File raw_starcode_counts = "${output_name}_stats.tsv"
+      File timing_info         = "${timing_output_file}"
     }
 }
 

@@ -99,6 +99,20 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         sample_name : "[optional] The name of the sample to associate with the data in this workflow."
     }
 
+    # Create some runtime attributes that will force google to do network transfers really fast:
+    RuntimeAttr fast_network_attrs = object {
+        cpu_cores:  4,
+        mem_gb:     32,
+        disk_type:  "LOCAL",
+        preemptible_tries:  0
+    }
+    RuntimeAttr fast_network_attrs_preemptible = object {
+        cpu_cores:  4,
+        mem_gb:     32,
+        disk_type:  "LOCAL",
+        preemptible_tries:  1
+    }
+
     # Call our timestamp so we can store outputs without clobbering previous runs:
     call Utils.GetCurrentTimestampString as WdlExecutionStartTimestamp { input: }
 
@@ -149,7 +163,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             unaligned_bam = reads_bam,
             unaligned_pbi = read_pbi,
             prefix = SM + "_shard",
-            num_shards = 50,
+            num_shards = 300,
     }
 
     scatter (sharded_reads in ShardLongReads.unmapped_shards) {
@@ -282,7 +296,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             prefix = SM + "_ccs_reclaimed_array_elements_shard"
         }
 
-
         # Shard these reads even wider so we can make sure we don't run out of memory:
         call PB.ShardLongReads as ShardCorrectedReads {
             input:
@@ -307,47 +320,74 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 bams = SegmentAnnotatedReads.segmented_bam,
                 prefix = SM + "_ArrayElements_intermediate_1"
         }
+    }
 
-        # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
-        if (is_SIRV_data) {
-            call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
-                input:
-                    bam_file = MergeArrayElements_1.merged_bam,
-                    prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
-            }
+    ############################################################################################################
+    ############################################################################################################
+
+    # At this point we must merge all our files together again so we can annotate the CBCs with the 10x tool:
+    # Merge all outputs of Longbow Annotate / Segment:
+    call Utils.MergeBams as MergeArrayElementsForBarcoding {
+        input:
+            bams = MergeArrayElements_1.merged_bam,
+            prefix = SM + "_ArrayElements_intermediate_1",
+            runtime_attr_override = fast_network_attrs
+    }
+
+    # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
+    if (is_SIRV_data) {
+        call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
+            input:
+                bam_file = MergeArrayElementsForBarcoding.merged_bam,
+                prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
         }
-        if ( ! is_SIRV_data ) {
-
-            RuntimeAttr tenx_annotation_attrs = object {
-                mem_gb: 32
-            }
-
-            call TENX.AnnotateBarcodesAndUMIs as TenxAnnotateArrayElements {
-                input:
-                    bam_file = MergeArrayElements_1.merged_bam,
-                    bam_index = MergeArrayElements_1.merged_bai,
-                    head_adapter_fasta = head_adapter_fasta,
-                    tail_adapter_fasta = tail_adapter_fasta,
-                    whitelist_10x = ten_x_cell_barcode_whitelist,
-                    illumina_barcoded_bam = illumina_barcoded_bam,
-                    read_end_length = 200,
-                    poly_t_length = 31,
-                    barcode_length = 16,
-                    umi_length = 10,
-                    runtime_attr_override = tenx_annotation_attrs
-            }
+    }
+    if ( ! is_SIRV_data ) {
+        call TENX.AnnotateBarcodesAndUMIs as TenxAnnotateArrayElements {
+            input:
+                bam_file = MergeArrayElementsForBarcoding.merged_bam,
+                bam_index = MergeArrayElementsForBarcoding.merged_bai,
+                head_adapter_fasta = head_adapter_fasta,
+                tail_adapter_fasta = tail_adapter_fasta,
+                whitelist_10x = ten_x_cell_barcode_whitelist,
+                illumina_barcoded_bam = illumina_barcoded_bam,
+                read_end_length = 200,
+                poly_t_length = 31,
+                barcode_length = 16,
+                umi_length = 10,
+                runtime_attr_override = fast_network_attrs
         }
+    }
 
-        # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
-        # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
-        # output to `File?` instead of `File`
-        File annotated_array_elements = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
+    # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
+    # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
+    # output to `File?` instead of `File`
+    File annotated_array_elements = if is_SIRV_data then select_first([TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([TenxAnnotateArrayElements.output_bam])
+    call PB.PBIndex as PbIndexAnnotatedArrayElements {
+        input:
+            bam = annotated_array_elements,
+            runtime_attr_override = fast_network_attrs
+    }
+
+    ############################################################################################################
+    ############################################################################################################
+    # Now we can re-shard our array elements for extraction, alignment and labeling:
+
+    call PB.ShardLongReads as ShardArrayElements {
+        input:
+            unaligned_bam = reads_bam,
+            unaligned_pbi = read_pbi,
+            prefix = SM + "_shard",
+            num_shards = 300,
+    }
+
+    scatter (sharded_array_elements in ShardArrayElements.unmapped_shards) {
 
         # Grab only the coding regions of the annotated reads for our alignments:
         Int extract_start_offset = if is_SIRV_data then 8 else 26
         call LONGBOW.Extract as ExtractCodingRegionsFromArrayElements {
             input:
-                bam = annotated_array_elements,
+                bam = sharded_array_elements,
                 start_offset = extract_start_offset,
                 prefix = SM + "_ArrayElements_Coding_Regions_Only"
         }
@@ -485,7 +525,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     RuntimeAttr merge_extra_cpu_attrs = object {
         cpu_cores: 4
     }
-    call Utils.MergeBams as MergeCbcUmiArrayElements { input: bams = annotated_array_elements, prefix = SM + "_array_elements", runtime_attr_override = merge_extra_cpu_attrs }  # TODO: Make prefix: `_annotated_array_elements`
     call Utils.MergeBams as MergeLongbowExtractedArrayElements { input: bams = ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
     call Utils.MergeBams as MergeTranscriptomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
     call Utils.MergeBams as MergeGenomeAlignedExtractedArrayElements { input: bams = RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned", runtime_attr_override = merge_extra_cpu_attrs }
@@ -497,15 +536,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 #        input:
 #            bam = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam
 #    }
-
-    # Merge the 10x stats:
-    if ( ! is_SIRV_data ) {
-        call Utils.MergeCountTsvFiles as Merge10XStats_1 {
-            input:
-                count_tsv_files = select_all(TenxAnnotateArrayElements.stats),
-                prefix = SM + "_10x_stats"
-        }
-    }
 
     # Collect metrics on the subreads bam:
     RuntimeAttr subreads_sam_stats_runtime_attrs = object {
@@ -624,12 +654,12 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             ccs_reclaimable_reads             = annotated_ccs_reclaimable_reads,
             ccs_reclaimed_reads               = ccs_reclaimed_reads,
             ccs_rejected_longbow_failed_reads = longbow_failed_ccs_unreclaimable_reads,
-            raw_array_elements                = MergeCbcUmiArrayElements.merged_bam,
+            raw_array_elements                = annotated_array_elements,
             ccs_reclaimed_array_elements      = ccs_reclaimed_array_elements,
 
             zmw_stats_json_gz                 = FindZmwStatsJsonGz.zmw_stats_json_gz,
 
-            ten_x_metrics_file                = Merge10XStats_1.merged_tsv,
+            ten_x_metrics_file                = TenxAnnotateArrayElements.stats,
             mas_seq_model                     = mas_seq_model,
 
             workflow_dot_file                 = workflow_dot_file,
@@ -703,8 +733,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     call FF.FinalizeToDir as FinalizeArrayElementReads {
         input:
             files = [
-                MergeCbcUmiArrayElements.merged_bam,
-                MergeCbcUmiArrayElements.merged_bai,
+                annotated_array_elements,
                 MergeLongbowExtractedArrayElements.merged_bam,
                 MergeLongbowExtractedArrayElements.merged_bai,
                 MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
@@ -745,24 +774,22 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if (! is_SIRV_data) {
         String tenXToolMetricsDir = metrics_out_dir + "/ten_x_tool_metrics"
 
-        ## TODO: Make this consolidate the stats first:
-        scatter ( i in range(length(TenxAnnotateArrayElements.output_bam))) {
-            call FF.FinalizeToDir as FinalizeTenXRgStats {
-                input:
-                    files = select_all([
-                        TenxAnnotateArrayElements.barcode_stats[i],
-                        TenxAnnotateArrayElements.starcode[i],
-                        TenxAnnotateArrayElements.stats[i],
-                        TenxAnnotateArrayElements.timing_info[i]
-                    ]),
-                    outdir = tenXToolMetricsDir + "/" + i,
-                    keyfile = GenerateStaticReport.html_report
-            }
+        call FF.FinalizeToDir as FinalizeTenXRgStats {
+            input:
+                files = select_all([
+                    TenxAnnotateArrayElements.barcode_stats,
+                    TenxAnnotateArrayElements.starcode,
+                    TenxAnnotateArrayElements.stats,
+                    TenxAnnotateArrayElements.raw_starcode_counts,
+                    TenxAnnotateArrayElements.timing_info
+                ]),
+                outdir = tenXToolMetricsDir,
+                keyfile = GenerateStaticReport.html_report
         }
         call FF.FinalizeToDir as FinalizeTenXOverallStats {
             input:
                 files = [
-                    select_first([Merge10XStats_1.merged_tsv])
+                    select_first([TenxAnnotateArrayElements.stats])
                 ],
                 outdir = tenXToolMetricsDir,
                 keyfile = GenerateStaticReport.html_report
