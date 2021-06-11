@@ -820,10 +820,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         call FF.FinalizeToDir as t_70_FinalizeProcessedQuantResults {
             input:
                 files = select_all([
-                    t_58_CreateCountMatrixAnndataFromTsv.gene_count_anndata_pickle,
-                    t_58_CreateCountMatrixAnndataFromTsv.transcript_count_anndata_pickle,
-                    t_58_CreateCountMatrixAnndataFromTsv.gene_count_anndata_h5ad,
-                    t_58_CreateCountMatrixAnndataFromTsv.transcript_count_anndata_h5ad,
+                    t_58_CreateCountMatrixAnndataFromTsv.transcript_gene_count_anndata_h5ad,
+                    t_58_CreateCountMatrixAnndataFromTsv.transcript_gene_count_anndata_pickle,
                 ]),
                 outdir = quant_dir,
                 keyfile = t_61_GenerateStaticReport.html_report
