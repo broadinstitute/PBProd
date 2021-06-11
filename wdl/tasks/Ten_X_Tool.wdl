@@ -124,13 +124,27 @@ task AnnotateBarcodesAndUMIs {
     Boolean use_ssd = false
 
     # You may have to change the following two parameter values depending on the task requirements
-    Int disk_size_gb = ceil(( (size(bam_file, "GiB") + size(bam_index, "GiB")) * 8) + 20)
+    Int disk_size_gb = ceil(( (size(bam_file, "GiB") + size(bam_index, "GiB")) * 8) + 40)
 
     String timing_output_file = "timingInformation.txt"
 
     String output_name = basename(bam_file) + ".10x_annotated"
 
+    String memory_log_file = "memory_use.txt"
+
     command <<<
+
+        # Set up memory logging daemon:
+        MEM_LOG_INTERVAL_s=5
+        DO_MEMORY_LOG=true
+        while $DO_MEMORY_LOG ; do
+            date
+            date +%s
+            cat /proc/meminfo
+            sleep $MEM_LOG_INTERVAL_s
+        done >> ~{memory_log_file} &
+        mem_pid=$!
+
         set -e
         startTime=`date +%s.%N`
         echo "StartTime: $startTime" > ~{timing_output_file}
@@ -156,6 +170,15 @@ task AnnotateBarcodesAndUMIs {
 
         if [ ! -e "${output_name}_starcode_confidence_factor_barcode_counts.tsv" ] ; then
             touch ${output_name}_starcode_confidence_factor_barcode_counts.tsv
+        fi
+
+        # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
+        set +e
+        DO_MEMORY_LOG=false
+        sleep $(($MEM_LOG_INTERVAL_s  * 2))
+        kill -0 $mem_pid &> /dev/null
+        if [ $? -ne 0 ] ; then
+            kill -9 $mem_pid
         fi
 
         # Get and compute timing information:
@@ -200,6 +223,7 @@ task AnnotateBarcodesAndUMIs {
       File starcode            = "${output_name}_starcode.tsv"
       File stats               = "${output_name}_stats.tsv"
       File raw_starcode_counts = "${output_name}_stats.tsv"
+      File memory_info         = "${memory_log_file}"
       File timing_info         = "${timing_output_file}"
     }
 }
