@@ -94,6 +94,8 @@ task AnnotateBarcodesAndUMIs {
         File tail_adapter_fasta
         Int read_end_length
 
+        Boolean raw_extract_only = false
+
         File? whitelist_10x
         File? whitelist_illumina
 
@@ -118,6 +120,8 @@ task AnnotateBarcodesAndUMIs {
     String umi_len_arg = if defined(umi_length) then " --umi-length " else ""
 
     String do_index = if defined(bam_index) then "false" else "true"
+
+    String do_raw_arg = if raw_extract_only then " --raw " else ""
 
     # ------------------------------------------------
     # Get machine settings:
@@ -158,6 +162,7 @@ task AnnotateBarcodesAndUMIs {
             --name=~{output_name} \
             --read-end-length=~{read_end_length} \
             --record-umis \
+            ~{raw_extract_only} \
             ~{whitelist_10x_arg}~{default="" sep=" --whitelist-10x " whitelist_10x} \
             ~{whitelist_ilmn_arg}~{default="" sep=" --whitelist-illumina " whitelist_illumina} \
             ~{illumina_barcoded_bam_arg}~{default="" sep=" --illumina-bam " illumina_barcoded_bam} \
@@ -222,11 +227,208 @@ task AnnotateBarcodesAndUMIs {
       File barcode_stats       = "${output_name}_barcode_stats.tsv"
       File starcode            = "${output_name}_starcode.tsv"
       File stats               = "${output_name}_stats.tsv"
-      File raw_starcode_counts = "${output_name}_stats.tsv"
+      File raw_starcode_counts = "${output_name}_starcode_confidence_factor_barcode_counts.tsv"
       File memory_info         = "${memory_log_file}"
       File timing_info         = "${timing_output_file}"
     }
 }
+
+task CorrectBarcodesWithStarcodeSeedCounts {
+    input {
+        File bam_file
+        File starcode_seeds_tsv
+
+        String prefix = "sample"
+
+        File? whitelist_10x
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    String whitelist_10x_arg = if defined(whitelist_10x) then " --whitelist-10x " else ""
+
+    # ------------------------------------------------
+    # Get machine settings:
+
+    # You may have to change the following two parameter values depending on the task requirements
+    Int disk_size_gb = ceil(( (size(bam_file, "GiB") + size(starcode_seeds_tsv, "GiB")) * 8) + 40)
+
+    String timing_output_file = "timingInformation.txt"
+    String memory_log_file = "memory_use.txt"
+
+    command <<<
+
+        # Set up memory logging daemon:
+        MEM_LOG_INTERVAL_s=5
+        DO_MEMORY_LOG=true
+        while $DO_MEMORY_LOG ; do
+            date
+            date +%s
+            cat /proc/meminfo
+            sleep $MEM_LOG_INTERVAL_s
+        done >> ~{memory_log_file} &
+        mem_pid=$!
+
+        set -e
+        startTime=`date +%s.%N`
+        echo "StartTime: $startTime" > ~{timing_output_file}
+
+        source activate 10x_tool
+
+        python /lrma/tool_starcode_seeded.py \
+            --bam=~{bam_file} \
+            --counts=~{starcode_seeds_tsv} \
+            --name=~{prefix} \
+            ~{whitelist_10x_arg}~{default="" sep=" --whitelist-10x " whitelist_10x}
+
+
+        endTime=`date +%s.%N`
+        echo "EndTime: $endTime" >> ~{timing_output_file}
+
+        # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
+        set +e
+        DO_MEMORY_LOG=false
+        sleep $(($MEM_LOG_INTERVAL_s  * 2))
+        kill -0 $mem_pid &> /dev/null
+        if [ $? -ne 0 ] ; then
+            kill -9 $mem_pid
+        fi
+
+        # Get and compute timing information:
+        set +e
+        elapsedTime=""
+        which bc &> /dev/null ; bcr=$?
+        which python3 &> /dev/null ; python3r=$?
+        which python &> /dev/null ; pythonr=$?
+        if [[ $bcr -eq 0 ]] ; then elapsedTime=`echo "scale=6;$endTime - $startTime" | bc`;
+        elif [[ $python3r -eq 0 ]] ; then elapsedTime=`python3 -c "print( $endTime - $startTime )"`;
+        elif [[ $pythonr -eq 0 ]] ; then elapsedTime=`python -c "print( $endTime - $startTime )"`;
+        fi
+        echo "Elapsed Time: $elapsedTime" >> ~{timing_output_file}
+
+    >>>
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             16,
+        disk_gb:            disk_size_gb,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-10x:0.1.14"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+
+    output {
+      File output_bam          = "${output_name}_corrected_barcodes.bam"
+      File memory_info         = "${memory_log_file}"
+      File timing_info         = "${timing_output_file}"
+    }
+}
+
+task ExtractIlmnBarcodeConfScores {
+    input {
+        File bam_file
+
+        String prefix = "sample"
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    # You may have to change the following two parameter values depending on the task requirements
+    Int disk_size_gb = (size(bam_file, "GiB") * 8) + 40
+
+    String timing_output_file = "timingInformation.txt"
+    String memory_log_file = "memory_use.txt"
+
+    command <<<
+
+        # Set up memory logging daemon:
+        MEM_LOG_INTERVAL_s=5
+        DO_MEMORY_LOG=true
+        while $DO_MEMORY_LOG ; do
+            date
+            date +%s
+            cat /proc/meminfo
+            sleep $MEM_LOG_INTERVAL_s
+        done >> ~{memory_log_file} &
+        mem_pid=$!
+
+        set -e
+        startTime=`date +%s.%N`
+        echo "StartTime: $startTime" > ~{timing_output_file}
+
+        source activate 10x_tool
+
+        python /lrma/extract_ilmn_bc_conf_scores.py \
+            --bam=~{bam_file} \
+            --prefix=~{prefix}
+
+        endTime=`date +%s.%N`
+        echo "EndTime: $endTime" >> ~{timing_output_file}
+
+        # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
+        set +e
+        DO_MEMORY_LOG=false
+        sleep $(($MEM_LOG_INTERVAL_s  * 2))
+        kill -0 $mem_pid &> /dev/null
+        if [ $? -ne 0 ] ; then
+            kill -9 $mem_pid
+        fi
+
+        # Get and compute timing information:
+        set +e
+        elapsedTime=""
+        which bc &> /dev/null ; bcr=$?
+        which python3 &> /dev/null ; python3r=$?
+        which python &> /dev/null ; pythonr=$?
+        if [[ $bcr -eq 0 ]] ; then elapsedTime=`echo "scale=6;$endTime - $startTime" | bc`;
+        elif [[ $python3r -eq 0 ]] ; then elapsedTime=`python3 -c "print( $endTime - $startTime )"`;
+        elif [[ $pythonr -eq 0 ]] ; then elapsedTime=`python -c "print( $endTime - $startTime )"`;
+        fi
+        echo "Elapsed Time: $elapsedTime" >> ~{timing_output_file}
+
+    >>>
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             16,
+        disk_gb:            disk_size_gb,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-10x:0.1.14"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+
+    output {
+      File conf_score_tsv = "${prefix}_ilmn_barcode_conf_scores.tsv"
+      File memory_info    = "${memory_log_file}"
+      File timing_info    = "${timing_output_file}"
+    }
+}
+
+
 
 task ExtractCbcAndUmiFromAnnotatedReadForUmiTools {
     input {

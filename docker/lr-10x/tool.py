@@ -8,6 +8,8 @@ import os.path
 import gzip
 import ctypes
 import sys
+import shutil
+
 import numpy as np
 
 from tqdm import tqdm
@@ -32,6 +34,8 @@ BARCODE_QUAL_TAG = "CY"
 ADAPTER_POS_TAG = "XA"
 BARCODE_POS_TAG = "XB"
 UMI_POS_TAG = "XU"
+
+BARCODE_CORRECTED_TAG = "XC"
 
 CONF_FACTOR_SCALE = 100
 
@@ -543,7 +547,7 @@ def get_confidence_factor(qual_string: str, scale_factor: float = CONF_FACTOR_SC
     """Get the confidence factor for the given sequence to be tallied for use with STARCODE.
     quals are assumed to be phred scale quality scores in string format and will be converted to numerical values."""
     return scale_factor * reduce(
-        operator.mul, map(lambda q: 1. - 10 ** (-(ord(q) - 33.) / 10) , qual_string)
+        operator.mul, map(lambda q: 1. - 10 ** (-(ord(q) - 33.) / 10), qual_string)
     )
 
 
@@ -551,11 +555,13 @@ def get_confidence_factor_raw_quals(quals: array.array, scale_factor: float = CO
     """Get the confidence factor for the given sequence to be tallied for use with STARCODE.
     quals are assumed to be numerical already and will not be type converted."""
     return scale_factor * reduce(
-        operator.mul, map(lambda q: 1. - 10 ** (-q/10) , quals)
+        operator.mul, map(lambda q: 1. - 10 ** (-q/10), quals)
     )
 
 
-def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename, illumina_bam, whitelist_10x_filename, whitelist_illumina_filename, max_reads, contig, read_end_length, record_umis, ssw_path, starcode_path):
+def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename, illumina_bam, whitelist_10x_filename,
+         whitelist_illumina_filename, max_reads, contig, read_end_length, record_umis, ssw_path, starcode_path,
+         raw_extraction_only):
     """
     Main function for the tool
     :param bam_filename: Filename of the reads BAM file
@@ -571,6 +577,7 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
     :param record_umis: Whether or not to store the UMIs in a separate file
     :param ssw_path: Path to the ssw library
     :param starcode_path: Path to the starcode executable
+    :param raw_extraction_only: If True, will only perform raw CBc/UMI extraction with no corrections.
     """
     ssw = ssw_lib.CSsw(ssw_path)
     alphabet, letter_to_int, mat = ssw_build_matrix()
@@ -582,127 +589,98 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
     with pysam.FastaFile(tso_fasta_filename) as tso_fasta_file:
         tso_sequence = tso_fasta_file.fetch(reference='adapter_sequence')
 
-    # We need to do some bookkeeping if we're using the illumina_bam:
-    try:
-        barcode_count_filename = None
-        if illumina_bam:
-            print('Illumina bam file provided.  Will seed starcode with both illumina and long reads.')
-            barcode_count_filename = f"{analysis_name}_starcode_confidence_factor_barcode_counts.tsv"
-            barcode_count_file = open(barcode_count_filename, "w")
+    # Let the user know that we're going to seed Starcode with ilmn + long reads data:
+    if illumina_bam:
+        print('Illumina bam file provided.  Will seed starcode with both illumina and long reads.')
 
-        with pysam.AlignmentFile(bam_filename, 'rb', check_sq=False) as bam_file, \
-                tqdm(desc=f"Collecting barcodes from long reads", unit="read") as pbar:
-            with pysam.AlignmentFile(analysis_name + '.intermediate.bam', 'wb', header=bam_file.header) as intermediate_file:
-                if whitelist_10x_filename:
-                    whitelist_10x = read_barcodes(whitelist_10x_filename)
-                else:
-                    whitelist_10x = None
+    # Track the barcode counts:
+    barcode_count_filename = f"{analysis_name}_starcode_confidence_factor_barcode_counts.tsv"
 
-                if whitelist_illumina_filename:
-                    whitelist_illumina = read_barcodes(whitelist_illumina_filename)
-                else:
-                    whitelist_illumina = None
+    with pysam.AlignmentFile(bam_filename, 'rb', check_sq=False) as bam_file, \
+            open(barcode_count_filename, "w") as barcode_count_file, \
+            tqdm(desc=f"Collecting barcodes from long reads", unit="read") as pbar:
+        with pysam.AlignmentFile(analysis_name + '.intermediate.bam', 'wb', header=bam_file.header) as intermediate_file:
+            if whitelist_10x_filename:
+                whitelist_10x = read_barcodes(whitelist_10x_filename)
+            else:
+                whitelist_10x = None
 
-                stats = AnalysisStats()
+            if whitelist_illumina_filename:
+                whitelist_illumina = read_barcodes(whitelist_illumina_filename)
+            else:
+                whitelist_illumina = None
 
-                observed_barcodes = dict()
-                observed_barcodes_umis = dict()
+            stats = AnalysisStats()
 
-                for read in bam_file.fetch(until_eof=True):
+            observed_barcodes = dict()
+            observed_barcodes_umis = dict()
 
-                    if max_reads is not None and stats.reads_seen > max_reads:
-                        break
+            for read in bam_file.fetch(until_eof=True):
 
-                    stats.reads_seen += 1
+                if max_reads is not None and stats.reads_seen > max_reads:
+                    break
 
-                    sequence, adapter_alignment_start, adapter_alignment_end, sequence_quals = align(
-                        read, stats, ssw, alphabet, letter_to_int, mat, read_end_length, adapter_sequence, tso_sequence
+                stats.reads_seen += 1
+
+                sequence, adapter_alignment_start, adapter_alignment_end, sequence_quals = align(
+                    read, stats, ssw, alphabet, letter_to_int, mat, read_end_length, adapter_sequence, tso_sequence
+                )
+
+                if sequence is None or adapter_alignment_end is None:
+                    read.set_tag(ADAPTER_TAG, ".", value_type='Z')
+                    read.set_tag(RAW_BARCODE_TAG, ".", value_type='Z')
+                    read.set_tag(UMI_TAG, ".", value_type='Z')
+
+                    read.set_tag(ADAPTER_POS_TAG, ".", value_type='Z')
+                    read.set_tag(BARCODE_POS_TAG, ".", value_type='Z')
+                    read.set_tag(UMI_POS_TAG, ".", value_type='Z')
+
+                    intermediate_file.write(read)
+
+                    pbar.update(1)
+                    continue
+
+                # Barcode
+                observed_barcode, observed_barcode_position, observed_barcode_in_10x, observed_barcode_in_illumina = process_barcode(sequence, adapter_alignment_end, stats, whitelist_10x, whitelist_illumina)
+                if observed_barcode is None:
+                    read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
+                    read.set_tag(RAW_BARCODE_TAG, ".", value_type='Z')
+                    read.set_tag(UMI_TAG, ".", value_type='Z')
+
+                    read.set_tag(
+                        ADAPTER_POS_TAG,
+                        ",".join([str(adapter_alignment_start), str(adapter_alignment_end)]),
+                        value_type='Z'
                     )
+                    read.set_tag(BARCODE_POS_TAG, ".", value_type='Z')
+                    read.set_tag(UMI_POS_TAG, ".", value_type='Z')
 
-                    if sequence is None or adapter_alignment_end is None:
-                        read.set_tag(ADAPTER_TAG, ".", value_type='Z')
-                        read.set_tag(RAW_BARCODE_TAG, ".", value_type='Z')
-                        read.set_tag(UMI_TAG, ".", value_type='Z')
+                    intermediate_file.write(read)
 
-                        read.set_tag(ADAPTER_POS_TAG, ".", value_type='Z')
-                        read.set_tag(BARCODE_POS_TAG, ".", value_type='Z')
-                        read.set_tag(UMI_POS_TAG, ".", value_type='Z')
+                    pbar.update(1)
+                    continue
 
-                        intermediate_file.write(read)
+                observed_barcodes[observed_barcode] = observed_barcodes.get(observed_barcode, 0) + 1
 
-                        pbar.update(1)
-                        continue
+                # If we're using illumina counts to seed our starcode graph, we should track our long read
+                # barcodes and the count here:
+                if illumina_bam:
+                    barcode_base_quals = sequence_quals[
+                                         observed_barcode_position:observed_barcode_position + BARCODE_LENGTH]
 
-                    # Barcode
-                    observed_barcode, observed_barcode_position, observed_barcode_in_10x, observed_barcode_in_illumina = process_barcode(sequence, adapter_alignment_end, stats, whitelist_10x, whitelist_illumina)
-                    if observed_barcode is None:
-                        read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
-                        read.set_tag(RAW_BARCODE_TAG, ".", value_type='Z')
-                        read.set_tag(UMI_TAG, ".", value_type='Z')
+                    # Get our conf factor and round it to the nearest int:
+                    cf_raw = get_confidence_factor_raw_quals(barcode_base_quals)
+                    conf_factor = int(np.round(cf_raw))
 
-                        read.set_tag(
-                            ADAPTER_POS_TAG,
-                            ",".join([str(adapter_alignment_start), str(adapter_alignment_end)]),
-                            value_type='Z'
-                        )
-                        read.set_tag(BARCODE_POS_TAG, ".", value_type='Z')
-                        read.set_tag(UMI_POS_TAG, ".", value_type='Z')
+                    # Write our barcode and confidence factor:
+                    barcode_count_file.write(f"{observed_barcode}\t{conf_factor}\n")
 
-                        intermediate_file.write(read)
-
-                        pbar.update(1)
-                        continue
-
-                    observed_barcodes[observed_barcode] = observed_barcodes.get(observed_barcode, 0) + 1
-
-                    # If we're using illumina counts to seed our starcode graph, we should track our barcodes and the
-                    # count here:
-                    if illumina_bam:
-                        barcode_base_quals = sequence_quals[
-                                             observed_barcode_position:observed_barcode_position + BARCODE_LENGTH]
-
-                        # Get our conf factor and round it to the nearest int:
-                        cf_raw = get_confidence_factor_raw_quals(barcode_base_quals)
-                        conf_factor = int(np.round(cf_raw))
-                        # print(f"{read.query_name}: CF: {conf_factor} | {cf_raw}")
-
-                        # Write our barcode and confidence factor:
-                        barcode_count_file.write(f"{observed_barcode}\t{conf_factor}\n")
-
-                    # UMI
-                    observed_umi, observed_umi_position = process_umi(sequence, observed_barcode_position, stats)
-                    if observed_umi is None:
-                        read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
-                        read.set_tag(RAW_BARCODE_TAG, observed_barcode, value_type='Z')
-                        read.set_tag(UMI_TAG, ".", value_type='Z')
-
-                        read.set_tag(
-                            ADAPTER_POS_TAG,
-                            ",".join([str(adapter_alignment_start), str(adapter_alignment_end)]),
-                            value_type='Z'
-                        )
-                        read.set_tag(
-                            BARCODE_POS_TAG,
-                            ",".join([str(observed_barcode_position), str(observed_barcode_position + BARCODE_LENGTH)]),
-                            value_type='Z'
-                        )
-                        read.set_tag(UMI_POS_TAG, ".", value_type='Z')
-
-                        intermediate_file.write(read)
-
-                        pbar.update(1)
-                        continue
-
-                    # Poly-T
-                    poly_t_found = process_poly_t(sequence, observed_umi_position, stats)
-                    if not poly_t_found:
-                        pass
-
-                    observed_barcodes_umis[(observed_barcode, observed_umi)] = observed_barcodes_umis.get((observed_barcode, observed_umi), 0) + 1
-
+                # UMI
+                observed_umi, observed_umi_position = process_umi(sequence, observed_barcode_position, stats)
+                if observed_umi is None:
                     read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
                     read.set_tag(RAW_BARCODE_TAG, observed_barcode, value_type='Z')
-                    read.set_tag(UMI_TAG, observed_umi, value_type='Z')
+                    read.set_tag(UMI_TAG, ".", value_type='Z')
 
                     read.set_tag(
                         ADAPTER_POS_TAG,
@@ -714,20 +692,50 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
                         ",".join([str(observed_barcode_position), str(observed_barcode_position + BARCODE_LENGTH)]),
                         value_type='Z'
                     )
-                    read.set_tag(
-                        UMI_POS_TAG,
-                        ",".join([str(observed_umi_position), str(observed_umi_position + UMI_LENGTH)]),
-                        value_type='Z'
-                    )
+                    read.set_tag(UMI_POS_TAG, ".", value_type='Z')
 
                     intermediate_file.write(read)
-                    pbar.update(1)
-    finally:
-        if illumina_bam:
-            barcode_count_file.close()
 
-    print('Performing barcode corrections...')
-    correct_barcodes(observed_barcodes, analysis_name, stats, illumina_bam, barcode_count_filename, whitelist_10x, whitelist_illumina, starcode_path)
+                    pbar.update(1)
+                    continue
+
+                # Poly-T
+                poly_t_found = process_poly_t(sequence, observed_umi_position, stats)
+                if not poly_t_found:
+                    pass
+
+                observed_barcodes_umis[(observed_barcode, observed_umi)] = \
+                    observed_barcodes_umis.get((observed_barcode, observed_umi), 0) + 1
+
+                read.set_tag(ADAPTER_TAG, adapter_sequence, value_type='Z')
+                read.set_tag(RAW_BARCODE_TAG, observed_barcode, value_type='Z')
+                read.set_tag(UMI_TAG, observed_umi, value_type='Z')
+
+                read.set_tag(
+                    ADAPTER_POS_TAG,
+                    ",".join([str(adapter_alignment_start), str(adapter_alignment_end)]),
+                    value_type='Z'
+                )
+                read.set_tag(
+                    BARCODE_POS_TAG,
+                    ",".join([str(observed_barcode_position), str(observed_barcode_position + BARCODE_LENGTH)]),
+                    value_type='Z'
+                )
+                read.set_tag(
+                    UMI_POS_TAG,
+                    ",".join([str(observed_umi_position), str(observed_umi_position + UMI_LENGTH)]),
+                    value_type='Z'
+                )
+
+                intermediate_file.write(read)
+                pbar.update(1)
+
+    if raw_extraction_only:
+        # Copy intermediate file to output file:
+        shutil.copy(f"{analysis_name}.intermediate.bam", f"{analysis_name}.bam")
+    else:
+        print('Performing barcode corrections...')
+        correct_barcodes(observed_barcodes, analysis_name, stats, illumina_bam, barcode_count_filename, whitelist_10x, whitelist_illumina, starcode_path)
 
     if analysis_name:
         if record_umis:
@@ -761,6 +769,7 @@ def correct_barcodes(observed_barcodes, analysis_name, stats, illumina_bam, barc
         with open(barcode_count_filename, "a") as barcode_file:
             with pysam.AlignmentFile(illumina_bam, "rb", check_sq=False) as bam_file, \
                     tqdm(desc=f"Processing ILMN short reads", unit="read") as pbar:
+
                 for read in bam_file.fetch(until_eof=True):
                     # This bam file should have the RAW_BARCODE_TAG and BARCODE_QUAL_TAG tags.
                     # these are the data we need for our barcode file:
@@ -792,6 +801,7 @@ def correct_barcodes(observed_barcodes, analysis_name, stats, illumina_bam, barc
         with pysam.AlignmentFile(analysis_name + '.bam', 'wb', check_sq=False, header=bam_file.header) as output_file:
             for read in bam_file.fetch(until_eof=True):
                 read.set_tag(BARCODE_TAG, read.get_tag(RAW_BARCODE_TAG), value_type='Z')
+                read.set_tag(BARCODE_CORRECTED_TAG, False)
 
                 raw_barcode = read.get_tag(RAW_BARCODE_TAG)
                 corrected_barcode = correction_dict[raw_barcode]
@@ -805,16 +815,19 @@ def correct_barcodes(observed_barcodes, analysis_name, stats, illumina_bam, barc
                 if whitelist_illumina is not None:
                     if corrected_barcode in whitelist_illumina:
                         read.set_tag(BARCODE_TAG, corrected_barcode, value_type='Z')
+                        read.set_tag(BARCODE_CORRECTED_TAG, True)
                     else:
                         stats.barcode_filtered += 1
                 else:
                     if whitelist_10x is not None:
                         if corrected_barcode in whitelist_10x:
                             read.set_tag(BARCODE_TAG, corrected_barcode, value_type='Z')
+                            read.set_tag(BARCODE_CORRECTED_TAG, True)
                         else:
                             stats.barcode_filtered += 1
                     else:
                         read.set_tag(BARCODE_TAG, corrected_barcode, value_type='Z')
+                        read.set_tag(BARCODE_CORRECTED_TAG, True)
 
                 if whitelist_10x is not None:
                     if raw_barcode not in whitelist_10x:
@@ -857,6 +870,8 @@ if __name__ == '__main__':
                              "This confidence factor scaling will be done for both the short illumina reads and the "
                              "long reads in the given files.",
                         default=None)
+
+    parser.add_argument("--raw", help="If given, will not perform barcode correction and will only annotate raw barcodes / UMIs / etc.", action="store_true")
 
     parser.add_argument('--whitelist-10x', help='10x whitelist filename. This may be GZIP compressed (has to have extension .gz in that case)')
     parser.add_argument('--whitelist-illumina', help='Illumina whitelist filename. This may be GZIP compressed (has to have extension .gz in that case)')
@@ -902,5 +917,5 @@ if __name__ == '__main__':
         UMI_LENGTH = args.umi_length
 
     main(args.bam, args.name, args.adapter, args.reverse_adapter, args.illumina_bam, args.whitelist_10x, args.whitelist_illumina,
-         args.max_reads, args.contig, args.read_end_length, args.record_umis, args.ssw_path, args.starcode_path)
+         args.max_reads, args.contig, args.read_end_length, args.record_umis, args.ssw_path, args.starcode_path, args.raw)
 

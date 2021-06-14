@@ -320,49 +320,85 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 bams = t_24_SegmentAnnotatedReads.segmented_bam,
                 prefix = SM + "_ArrayElements_intermediate_1"
         }
-    }
 
-    ############################################################################################################
-    ############################################################################################################
-
-    # At this point we must merge all our files together again so we can annotate the CBCs with the 10x tool:
-    # Merge all outputs of Longbow Annotate / Segment:
-    call Utils.MergeBams as t_26_MergeArrayElementsForBarcoding {
-        input:
-            bams = t_25_MergeArrayElements_1.merged_bam,
-            prefix = SM + "_ArrayElements_intermediate_1",
-            runtime_attr_override = fast_network_attrs
-    }
-
-    # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
-    if (is_SIRV_data) {
-        call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement as t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElement {
-            input:
-                bam_file = t_26_MergeArrayElementsForBarcoding.merged_bam,
-                prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
+        # The SIRV library prep is slightly different from the standard prep, so we have to account for it here:
+        if (is_SIRV_data) {
+            call TENX.TagSirvUmiPositionsFromLongbowAnnotatedArrayElement as t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElements {
+                input:
+                    bam_file = t_25_MergeArrayElements_1.merged_bam,
+                    prefix = SM + "_ArrayElements_SIRV_UMI_Extracted"
+            }
+        }
+        if ( !is_SIRV_data ) {
+            call TENX.AnnotateBarcodesAndUMIs as t_28_TenxAnnotateArrayElementsRaw {
+                input:
+                    bam_file = t_25_MergeArrayElements_1.merged_bam,
+                    bam_index = t_25_MergeArrayElements_1.merged_bai,
+                    head_adapter_fasta = head_adapter_fasta,
+                    tail_adapter_fasta = tail_adapter_fasta,
+                    whitelist_10x = ten_x_cell_barcode_whitelist,
+                    read_end_length = 200,
+                    poly_t_length = 31,
+                    barcode_length = 16,
+                    umi_length = 10,
+                    do_raw_arg = true,
+                    runtime_attr_override = fast_network_attrs
+            }
         }
     }
-    if ( ! is_SIRV_data ) {
-        call TENX.AnnotateBarcodesAndUMIs as t_28_TenxAnnotateArrayElements {
+
+    ############################################################################################################
+    ############################################################################################################
+
+    # Concatenate the TSV files with the barcode scores that we just created:
+    if ( is_SIRV_data ) {
+        call Utils.MergeBams as t_29_MergeSirvAnnotatedArrayElements {
             input:
-                bam_file = t_26_MergeArrayElementsForBarcoding.merged_bam,
-                bam_index = t_26_MergeArrayElementsForBarcoding.merged_bai,
-                head_adapter_fasta = head_adapter_fasta,
-                tail_adapter_fasta = tail_adapter_fasta,
-                whitelist_10x = ten_x_cell_barcode_whitelist,
-                illumina_barcoded_bam = illumina_barcoded_bam,
-                read_end_length = 200,
-                poly_t_length = 31,
-                barcode_length = 16,
-                umi_length = 10,
-                runtime_attr_override = fast_network_attrs
+                files_to_merge = select_all(t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElements.output_bam)
+        }
+    }
+    if ( !is_SIRV_data ) {
+        call Utils.MergeFiles as t_30_MergeUmiConfScoreTsvsForStarcode {
+            input:
+                files_to_merge = select_all(t_28_TenxAnnotateArrayElementsRaw.raw_starcode_counts)
+        }
+
+        # If we have our ilmn barcode file, we need to process it here:
+        if (defined(illumina_barcoded_bam)) {
+            call TENX.ExtractIlmnBarcodeConfScores as t_XX_ExtractIlmnBarcodeConfScores {
+                input:
+                    bam_file = illumina_barcoded_bam,
+                    prefix = SM
+            }
+        }
+
+        # Concatenate the TSV files with the barcode scores that we just created:
+        call Utils.MergeFiles as t_32_GetMasterUmiConfScoreTsvForStarcode {
+            input:
+                files_to_merge = [t_30_MergeUmiConfScoreTsvsForStarcode.merged_file, t_XX_ExtractIlmnBarcodeConfScores.conf_score_tsv]
+        }
+
+        # Now we can correct our barcodes:
+        scatter (tenx_annotated_bam in select_all(t_28_TenxAnnotateArrayElementsRaw.output_bam)) {
+            call TENX.CorrectBarcodesWithStarcodeSeedCounts as t_33_GetMasterUmiConfScoreTsvForStarcode {
+                input:
+                    bam_file = tenx_annotated_bam,
+                    starcode_seeds_tsv = select_first(t_32_GetMasterUmiConfScoreTsvForStarcode.merged_file),
+                    prefix = SM + "_array_elements"
+            }
+        }
+
+        # Merge the barcode corrected files here:
+        call Utils.MergeBams as t_34_MergeAnnotatedArrayElements {
+            input:
+                files_to_merge = select_all(t_33_GetMasterUmiConfScoreTsvForStarcode.output_bam)
         }
     }
 
     # Create an alias here that we can refer to in later steps regardless as to whether we have SIRV data or not
     # This `select_first` business is some sillyness to fix the conditional calls automatically converting the
     # output to `File?` instead of `File`
-    File annotated_array_elements = if is_SIRV_data then select_first([t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElement.output_bam]) else select_first([t_28_TenxAnnotateArrayElements.output_bam])
+    File annotated_array_elements = if is_SIRV_data then select_first([t_29_MergeSirvAnnotatedArrayElements.output_bam]) else select_first([t_33_GetMasterUmiConfScoreTsvForStarcode.output_bam])
     call PB.PBIndex as t_29_PbIndexAnnotatedArrayElements {
         input:
             bam = annotated_array_elements,
@@ -659,7 +695,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
             zmw_stats_json_gz                 = t_03_FindZmwStatsJsonGz.zmw_stats_json_gz,
 
-            ten_x_metrics_file                = t_28_TenxAnnotateArrayElements.stats,
+#            ten_x_metrics_file                = t_28_TenxAnnotateArrayElements.stats,
             mas_seq_model                     = mas_seq_model,
 
             workflow_dot_file                 = workflow_dot_file,
@@ -769,32 +805,32 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             keyfile = t_61_GenerateStaticReport.html_report
     }
 
-    # Finalize all the 10x metrics here:
-    # NOTE: We only run the 10x tool if we have real (non-SIRV) data, so we have to have this conditional here:
-    if (! is_SIRV_data) {
-        String tenXToolMetricsDir = metrics_out_dir + "/ten_x_tool_metrics"
-
-        call FF.FinalizeToDir as t_66_FinalizeTenXRgStats {
-            input:
-                files = select_all([
-                    t_28_TenxAnnotateArrayElements.barcode_stats,
-                    t_28_TenxAnnotateArrayElements.starcode,
-                    t_28_TenxAnnotateArrayElements.stats,
-                    t_28_TenxAnnotateArrayElements.raw_starcode_counts,
-                    t_28_TenxAnnotateArrayElements.timing_info
-                ]),
-                outdir = tenXToolMetricsDir,
-                keyfile = t_61_GenerateStaticReport.html_report
-        }
-        call FF.FinalizeToDir as t_67_FinalizeTenXOverallStats {
-            input:
-                files = [
-                    select_first([t_28_TenxAnnotateArrayElements.stats])
-                ],
-                outdir = tenXToolMetricsDir,
-                keyfile = t_61_GenerateStaticReport.html_report
-        }
-    }
+#    # Finalize all the 10x metrics here:
+#    # NOTE: We only run the 10x tool if we have real (non-SIRV) data, so we have to have this conditional here:
+#    if (! is_SIRV_data) {
+#        String tenXToolMetricsDir = metrics_out_dir + "/ten_x_tool_metrics"
+#
+#        call FF.FinalizeToDir as t_66_FinalizeTenXRgStats {
+#            input:
+#                files = select_all([
+#                    t_28_TenxAnnotateArrayElements.barcode_stats,
+#                    t_28_TenxAnnotateArrayElements.starcode,
+#                    t_28_TenxAnnotateArrayElements.stats,
+#                    t_28_TenxAnnotateArrayElements.raw_starcode_counts,
+#                    t_28_TenxAnnotateArrayElements.timing_info
+#                ]),
+#                outdir = tenXToolMetricsDir,
+#                keyfile = t_61_GenerateStaticReport.html_report
+#        }
+#        call FF.FinalizeToDir as t_67_FinalizeTenXOverallStats {
+#            input:
+#                files = [
+#                    select_first([t_28_TenxAnnotateArrayElements.stats])
+#                ],
+#                outdir = tenXToolMetricsDir,
+#                keyfile = t_61_GenerateStaticReport.html_report
+#        }
+#    }
 
     call FF.FinalizeToDir as t_68_FinalizeCCSMetrics {
         input:
