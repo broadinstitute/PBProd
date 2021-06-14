@@ -346,7 +346,7 @@ task ExtractIlmnBarcodeConfScores {
     }
 
     # You may have to change the following two parameter values depending on the task requirements
-    Int disk_size_gb = (size(bam_file, "GiB") * 8) + 40
+    Int disk_size_gb = ceil(size(bam_file, "GiB") * 8) + 40
 
     String timing_output_file = "timingInformation.txt"
     String memory_log_file = "memory_use.txt"
