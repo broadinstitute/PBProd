@@ -177,6 +177,10 @@ task AnnotateBarcodesAndUMIs {
             touch ${output_name}_starcode_confidence_factor_barcode_counts.tsv
         fi
 
+        if [ ! -e "${output_name}_starcode.tsv" ] ;then
+            touch h${output_name}_starcode.tsv
+        fi
+
         # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
         set +e
         DO_MEMORY_LOG=false
