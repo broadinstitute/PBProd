@@ -79,11 +79,13 @@ ADD reverse_adapter_sequence.fasta.pac /lrma/reverse_adapter_sequence.fasta.pac
 ADD reverse_adapter_sequence.fasta.sa /lrma/reverse_adapter_sequence.fasta.sa
 
 RUN pip3 install pysam biopython
+RUN pip3 install tqdm
 
 ADD tool.py /lrma/tool.py
 ADD tool_rle.py /lrma/tool_rle.py
+ADD tool_starcode_seeded.py /lrma/tool_starcode_seeded.py
+ADD extract_ilmn_bc_conf_scores.py /lrma/extract_ilmn_bc_conf_scores.py
 
-RUN pip3 install tqdm
 ADD restore_annotations_to_aligned_bam.py /lrma/restore_annotations_to_aligned_bam.py
 ADD extract_cbc_and_umi_from_annotated_read.py /lrma/extract_cbc_and_umi_from_annotated_read.py 
 ADD copy_contig_name_to_tag.py /lrma/copy_contig_name_to_tag.py 
