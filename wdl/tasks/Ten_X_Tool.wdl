@@ -330,7 +330,7 @@ task CorrectBarcodesWithStarcodeSeedCounts {
     }
 
     output {
-      File output_bam          = "${output_name}_corrected_barcodes.bam"
+      File output_bam          = "${prefix}_corrected_barcodes.bam"
       File memory_info         = "${memory_log_file}"
       File timing_info         = "${timing_output_file}"
     }
