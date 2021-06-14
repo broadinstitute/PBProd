@@ -173,12 +173,12 @@ task AnnotateBarcodesAndUMIs {
         endTime=`date +%s.%N`
         echo "EndTime: $endTime" >> ~{timing_output_file}
 
-        if [ ! -e "${output_name}_starcode_confidence_factor_barcode_counts.tsv" ] ; then
-            touch ${output_name}_starcode_confidence_factor_barcode_counts.tsv
+        # Make sure that the reqired output files all exist:
+        if [ ! -e "~{output_name}_starcode_confidence_factor_barcode_counts.tsv" ] ; then
+            touch ~{output_name}_starcode_confidence_factor_barcode_counts.tsv
         fi
-
-        if [ ! -e "${output_name}_starcode.tsv" ] ;then
-            touch ${output_name}_starcode.tsv
+        if [ ! -e "~{output_name}_starcode.tsv" ] ;then
+            touch ~{output_name}_starcode.tsv
         fi
 
         # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
