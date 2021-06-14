@@ -178,7 +178,7 @@ task AnnotateBarcodesAndUMIs {
         fi
 
         if [ ! -e "${output_name}_starcode.tsv" ] ;then
-            touch h${output_name}_starcode.tsv
+            touch ${output_name}_starcode.tsv
         fi
 
         # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
