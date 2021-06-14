@@ -35,7 +35,7 @@ def main(ilmn_cellranger_bam, out_prefix):
                 # Get our conf factor and write it out to the barcode file:
                 cf_raw = get_confidence_factor(barcode_qual_string)
                 conf_factor = int(np.round(cf_raw))
-                print(f"{read.query_name}: CF: {conf_factor} | {cf_raw}")
+                # print(f"{read.query_name}: CF: {conf_factor} | {cf_raw}")
 
                 barcode_file.write(f"{barcode}\t{conf_factor}\n")
                 pbar.update(1)
