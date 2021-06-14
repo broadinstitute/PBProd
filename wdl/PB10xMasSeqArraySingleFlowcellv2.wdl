@@ -368,7 +368,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             call TENX.ExtractIlmnBarcodeConfScores as t_XX_ExtractIlmnBarcodeConfScores {
                 input:
                     bam_file = select_first([illumina_barcoded_bam]),
-                    prefix = SM
+                    prefix = SM,
+                    runtime_attr_override = fast_network_attrs
             }
 
             # Concatenate the TSV files with the barcode scores that we just created:
