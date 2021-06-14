@@ -162,7 +162,7 @@ task AnnotateBarcodesAndUMIs {
             --name=~{output_name} \
             --read-end-length=~{read_end_length} \
             --record-umis \
-            ~{raw_extract_only} \
+            ~{do_raw_arg} \
             ~{whitelist_10x_arg}~{default="" sep=" --whitelist-10x " whitelist_10x} \
             ~{whitelist_ilmn_arg}~{default="" sep=" --whitelist-illumina " whitelist_illumina} \
             ~{illumina_barcoded_bam_arg}~{default="" sep=" --illumina-bam " illumina_barcoded_bam} \
