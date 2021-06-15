@@ -382,7 +382,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
         # Now we can correct our barcodes:
         scatter (tenx_annotated_bam in select_all(t_28_TenxAnnotateArrayElementsRaw.output_bam)) {
-            call TENX.CorrectBarcodesWithStarcodeSeedCounts as t_33_GetMasterUmiConfScoreTsvForStarcode {
+            call TENX.CorrectBarcodesWithStarcodeSeedCounts as t_33_CorrectBarcodesWithStarcodeSeedCounts {
                 input:
                     bam_file = tenx_annotated_bam,
                     starcode_seeds_tsv = starcode_seeds,
@@ -393,7 +393,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         # Merge the barcode corrected files here:
         call Utils.MergeBams as t_34_MergeAnnotatedArrayElements {
             input:
-                bams = t_33_GetMasterUmiConfScoreTsvForStarcode.output_bam
+                bams = t_33_CorrectBarcodesWithStarcodeSeedCounts.output_bam
         }
     }
 

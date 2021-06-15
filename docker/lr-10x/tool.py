@@ -662,18 +662,16 @@ def main(bam_filename, analysis_name, adapter_fasta_filename, tso_fasta_filename
 
                 observed_barcodes[observed_barcode] = observed_barcodes.get(observed_barcode, 0) + 1
 
-                # If we're using illumina counts to seed our starcode graph, we should track our long read
-                # barcodes and the count here:
-                if illumina_bam:
-                    barcode_base_quals = sequence_quals[
-                                         observed_barcode_position:observed_barcode_position + BARCODE_LENGTH]
+                # Track our long read barcodes and the count here:
+                barcode_base_quals = sequence_quals[
+                                     observed_barcode_position:observed_barcode_position + BARCODE_LENGTH]
 
-                    # Get our conf factor and round it to the nearest int:
-                    cf_raw = get_confidence_factor_raw_quals(barcode_base_quals)
-                    conf_factor = int(np.round(cf_raw))
+                # Get our conf factor and round it to the nearest int:
+                cf_raw = get_confidence_factor_raw_quals(barcode_base_quals)
+                conf_factor = int(np.round(cf_raw))
 
-                    # Write our barcode and confidence factor:
-                    barcode_count_file.write(f"{observed_barcode}\t{conf_factor}\n")
+                # Write our barcode and confidence factor:
+                barcode_count_file.write(f"{observed_barcode}\t{conf_factor}\n")
 
                 # UMI
                 observed_umi, observed_umi_position = process_umi(sequence, observed_barcode_position, stats)
