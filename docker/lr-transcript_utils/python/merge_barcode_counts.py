@@ -7,7 +7,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 # We must make sure we have data to merge:
-if len(sys.argv) != 1:
+if len(sys.argv) != 2:
     print(f"{sys.argv[0]} BARCODE_TSV_FILE", file=sys.stderr)
     print(f"Merge barcode counts in a given TSV count file.", file=sys.stderr)
     print(f"TSV file must be unheadered and must have 2 columns: BARCODE COUNT.", file=sys.stderr)
