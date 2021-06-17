@@ -50,7 +50,6 @@ task CreateCountMatrixFromAnnotatedBam {
     }
 }
 
-
 task MergeBarcodeCounts {
     meta {
         description : "Merge all counts for each unique barcode in the given TSV file.  Assumes file is unheadered and have two columns: BARCODE COUNT.  Merging performed by adding all COUNTs for each BARCODE."
@@ -78,7 +77,7 @@ task MergeBarcodeCounts {
     }
 
     output {
-        File merged_tsv = "~{prefix}.tsv"
+        File merged_counts = "~{prefix}.tsv"
     }
 
     #########################

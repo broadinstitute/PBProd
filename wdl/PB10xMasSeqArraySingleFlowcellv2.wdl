@@ -380,12 +380,19 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
         File starcode_seeds = if (defined(illumina_barcoded_bam)) then select_first([t_32_GetMasterUmiConfScoreTsvForStarcode.merged_file]) else t_30_MergeUmiConfScoreTsvsForStarcode.merged_file
 
+        # We have to consolidate our seeds into unique entries for starcode not to crash and burn:
+        call TX_POST.MergeBarcodeCounts as t_33_ConsolidateBarcodeCountsForStarcode {
+            input:
+                barcode_count_tsv = starcode_seeds,
+                prefix = SM + "_barcode_counts_for_starcode"
+        }
+
         # Now we can correct our barcodes:
         scatter (tenx_annotated_bam in select_all(t_28_TenxAnnotateArrayElementsRaw.output_bam)) {
             call TENX.CorrectBarcodesWithStarcodeSeedCounts as t_33_CorrectBarcodesWithStarcodeSeedCounts {
                 input:
                     bam_file = tenx_annotated_bam,
-                    starcode_seeds_tsv = starcode_seeds,
+                    starcode_seeds_tsv = t_33_ConsolidateBarcodeCountsForStarcode.merged_counts,
                     prefix = SM + "_array_elements"
             }
         }
