@@ -110,6 +110,9 @@ RUN wget https://github.com/COMBINE-lab/salmon/releases/download/v${salmon_versi
 # Get UMI-tools v1.1.1:
 RUN pip install umi_tools==1.1.1
 
+# Clean up apt-get process:
+RUN apt-get clean && apt-get purge && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 # Install our scripts:
 RUN mkdir /python_scripts 
 COPY python/* /python_scripts/
@@ -117,10 +120,6 @@ RUN chmod +x /python_scripts/*.py
 
 ################################################################################
 # Final runtime configuration:
-
-# Clean up apt-get process:
-RUN apt-get clean && apt-get purge && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
 # Let's start at the root:
 WORKDIR /
 
