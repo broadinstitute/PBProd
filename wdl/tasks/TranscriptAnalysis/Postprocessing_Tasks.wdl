@@ -50,6 +50,60 @@ task CreateCountMatrixFromAnnotatedBam {
     }
 }
 
+
+task MergeBarcodeCounts {
+    meta {
+        description : "Merge all counts for each unique barcode in the given TSV file.  Assumes file is unheadered and have two columns: BARCODE COUNT.  Merging performed by adding all COUNTs for each BARCODE."
+        author : "Jonn Smith"
+        email : "jonn@broadinstitute.org"
+    }
+
+    input {
+        File barcode_count_tsv
+        String prefix = "merged_counts"
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    # 20 gb - baseline storage for safety
+    # 1x for the file itself
+    # 2x for the results and some wiggle room.
+    Int disk_size_gb = 20 + (3 * ceil(size(barcode_count_tsv, "GB")))
+
+    command {
+        /python_scripts/merge_barcode_counts.py ~{barcode_count_tsv}
+        if [[ "~{prefix}.tsv" != "merged_counts.tsv" ]] ; then
+            mv merged_counts.tsv "~{prefix}.tsv"
+        fi
+    }
+
+    output {
+        File merged_tsv = "~{prefix}.tsv"
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          2,
+        mem_gb:             16,
+        disk_gb:            disk_size_gb,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-dsp-lrma/lr-transcript_utils:0.0.6"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}
+
+
 task CreateCountMatrixAnndataFromTsv {
 
     meta {
