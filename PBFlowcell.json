@@ -1,0 +1,12 @@
+{
+    "PBFlowcell.bam": "gs://broad-dsp-lrma-ci-resources/test_data/PBCCSOnly.test/input_data/TestSample_FC1/m64020_190208_213731.subreads.bam",
+    "PBFlowcell.pbi": "gs://broad-dsp-lrma-ci-resources/test_data/PBCCSOnly.test/input_data/TestSample_FC1/m64020_190208_213731.subreads.bam.pbi",
+    "PBFlowcell.ref_map_file": "gs://broad-dsde-methods-long-reads/resources/references/grch38_noalt/grch38_noalt.txt",
+    
+    "PBFlowcell.SM": "test_sample",
+    "PBFlowcell.ID": "test_id",
+    
+    "PBFlowcell.experiment_type": "CCS",
+    "PBFlowcell.dir_prefix": "test_sample",
+    "PBFlowcell.gcs_out_root_dir": "gs://broad-dsde-methods-long-reads-intermediate/"
+}
