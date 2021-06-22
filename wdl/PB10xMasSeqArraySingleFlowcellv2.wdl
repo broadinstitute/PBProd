@@ -354,7 +354,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
     if ( is_SIRV_data ) {
         call Utils.MergeBams as t_29_MergeSirvAnnotatedArrayElements {
             input:
-                bams = select_all(t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElements.output_bam)
+                bams = select_all(t_27_TagSirvUmiPositionsFromLongbowAnnotatedArrayElements.output_bam),
+                prefix = SM + "_SIRV_annotated_array_elements"
         }
     }
     if ( !is_SIRV_data ) {
@@ -400,7 +401,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         # Merge the barcode corrected files here:
         call Utils.MergeBams as t_34_MergeAnnotatedArrayElements {
             input:
-                bams = t_33_CorrectBarcodesWithStarcodeSeedCounts.output_bam
+                bams = t_33_CorrectBarcodesWithStarcodeSeedCounts.output_bam,
+                prefix = SM + "_annotated_array_elements"
         }
     }
 
@@ -442,7 +444,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 reads      = [ t_31_ExtractCodingRegionsFromArrayElements.extracted_reads ],
                 ref_fasta  = transcriptome_ref_fasta,
-                map_preset = "splice:hq"
+                map_preset = "asm20"
         }
 
         call AR.Minimap2 as t_33_AlignArrayElementsToGenome {
