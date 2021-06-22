@@ -83,7 +83,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         transcriptome_ref_fasta_index : "FASTA index file for the given transcriptome_ref_fasta file."
         transcriptome_ref_fasta_dict : "Sequence dictionary file for the given transcriptome_ref_fasta file."
 
-        genome_annotation_gtf : "Gencode GTF file containing genome annotations for the organism under study (usually humans).  This must match the given reference version (usually hg38)."
+        genome_annotation_gtf : "Gencode GTF file containing genome annotations for the organism under study (usually humans).  This must match the given reference version and transcriptiome reference (usually hg38)."
 
         jupyter_template_static : "Jupyter notebook / ipynb file containing a template for the QC report which will contain static plots.  This should contain the same information as the jupyter_template_interactive file, but with static images."
         workflow_dot_file : "DOT file containing the representation of this WDL to be included in the QC reports.  This can be generated with womtool."
