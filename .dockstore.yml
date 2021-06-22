@@ -92,3 +92,7 @@ workflows:
   subclass: wdl
   primaryDescriptorPath: /wdl/ONTMethylation.wdl
   testParameterFiles:
+- name: countRecords
+  subclass: wdl
+  primaryDescriptorPath: /wdl/count_records.wdl
+  testParameterFiles:
