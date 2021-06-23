@@ -157,17 +157,27 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     tx_ids = np.unique(np.array(list(gtf_field_dict.keys())))
 
     # Populate the count matrix:
-    count_mat = scipy.sparse.lil_matrix((len(cell_barcodes), len(tx_ids)), dtype=np.uint32)
+    pickle_file_name = os.path.splitext(os.path.basename(input_tsv))[0] + ".cell_transcript_count_matrix.pickle"
+    if not force_recount and os.path.exists(pickle_file_name):
+        print(f"Loading count map from {pickle_file_name}...", end="\t", file=sys.stderr)
+        count_mat = pickle.load(open(pickle_file_name, "rb"))
+        print("Done!", file=sys.stderr)
+    else:
+        count_mat = scipy.sparse.lil_matrix((len(cell_barcodes), len(tx_ids)), dtype=np.uint32)
 
-    tx_id_index_dict = {name: i for i, name in enumerate(tx_ids)}
-    with tqdm(desc=f"Creating cell transcript count matrix", unit=" cell",
-              total=len(cell_barcode_to_tx_count_dict)) as pbar:
+        tx_id_index_dict = {name: i for i, name in enumerate(tx_ids)}
+        with tqdm(desc=f"Creating cell transcript count matrix", unit=" cell",
+                  total=len(cell_barcode_to_tx_count_dict)) as pbar:
 
-        for i, (cb, counts_dict) in enumerate(cell_barcode_to_tx_count_dict.items()):
-            # Put the counts for each transcript in the right indices:
-            for tx_id, count in counts_dict.items():
-                count_mat[i, tx_id_index_dict[tx_id]] = count
-            pbar.update(1)
+            for i, (cb, counts_dict) in enumerate(cell_barcode_to_tx_count_dict.items()):
+                # Put the counts for each transcript in the right indices:
+                for tx_id, count in counts_dict.items():
+                    count_mat[i, tx_id_index_dict[tx_id]] = count
+                pbar.update(1)
+
+        print("Pickling data...", file=sys.stderr)
+        pickle.dump(count_mat, open(pickle_file_name, "wb"))
+        print("Done!", file=sys.stderr)
 
     # Now we set up the variables that we're going to apply to each observation:
     # We'll try two different ways - one for Gencode GTFs and one for stringtie GTFs:
@@ -182,6 +192,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
         de_novo_gene_ids = ["N/A"] * len(transcript_names)
         de_novo_transcript_ids = ["N/A"] * len(transcript_names)
         is_de_novo = [False] * len(transcript_names)
+        is_gene_id_ambiguous = [False] * len(transcript_names)
 
     except KeyError:
         # We must have stringtie data:
@@ -202,6 +213,53 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
         # Mark or de novo transcripts:
         is_de_novo = [tx_ids[i] == de_novo_transcript_ids[i] for i in range(len(tx_ids))]
 
+        # Now we have to clean up the gene names.
+        # If a stringtie gene overlaps a known gene at any point, we must use the known gene name.
+        de_novo_gene_id_to_canonical_gene_name_dict = dict()
+        for de_novo_gene_id, canonical_gene_id, canonical_gene_name in zip(de_novo_gene_ids, gene_ids, gene_names):
+            if de_novo_gene_id != canonical_gene_id:
+                # if de_novo_gene_id in de_novo_gene_id_to_canonical_gene_name_dict:
+                #     if de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id][0][0] != canonical_gene_id:
+                #         print(de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id][0])
+                #         raise RuntimeError(
+                #             f"ALREADY HAVE A MAPPING FOR: {de_novo_gene_id}: "
+                #             f"{de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id]}.  "
+                #             f"Got: {(canonical_gene_id, canonical_gene_name)}"
+                #         )
+                try:
+                    de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id].append((canonical_gene_id, canonical_gene_name))
+                except KeyError:
+                    de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id] = \
+                        [(canonical_gene_id, canonical_gene_name)]
+
+        # Make sure we don't have any ambiguous mappings:
+        print("Ambiguously / multi-mapped:")
+        multimapped = 0
+        ambiguous_de_novo_gene_set = set()
+        for de_novo_gene_id, gene_info_tuple_list in de_novo_gene_id_to_canonical_gene_name_dict.items():
+            if len(gene_info_tuple_list) > 1:
+                conflicting = False
+                for canonical_gene_id, _ in gene_info_tuple_list:
+                    if canonical_gene_id != gene_info_tuple_list[0][0]:
+                        conflicting = True
+                        break
+                if conflicting:
+                    multimapped += 1
+                    print(f"    {de_novo_gene_id}")
+                    gene_info_tuple_count_dict = dict()
+                    for canonical_gene_id, canonical_gene_name in gene_info_tuple_list:
+                        try:
+                            gene_info_tuple_count_dict[canonical_gene_id] += 1
+                        except KeyError:
+                            gene_info_tuple_count_dict[canonical_gene_id] = 1
+                    for canonical_gene_id, canonical_gene_name in set(gene_info_tuple_list):
+                        print(f"        {canonical_gene_id} -> {canonical_gene_name} ({gene_info_tuple_count_dict[canonical_gene_id]}x)")
+                    ambiguous_de_novo_gene_set.add(de_novo_gene_id)
+        print(f"Num ambiguously / multi-mapped = {multimapped}")
+
+        is_gene_id_ambiguous = [True if dngid in ambiguous_de_novo_gene_set else False for dngid in de_novo_gene_ids]
+
+        # Let downstream processing know we're not gencode:
         is_gencode = False
 
     # Create our anndata object now:
@@ -217,6 +275,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     col_df["de_novo_gene_ids"] = de_novo_gene_ids
     col_df["de_novo_transcript_ids"] = de_novo_transcript_ids
     col_df["is_de_novo"] = is_de_novo
+    col_df["is_gene_id_ambiguous"] = is_gene_id_ambiguous
 
     count_adata.var = col_df
 
