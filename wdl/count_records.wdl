@@ -25,7 +25,7 @@ task count {
         File out = "counts_out.txt"
     }
     runtime {
-           docker: "us.gcr.io/broad-dsp-lrma/lr-align:0.1.26"
+           docker: "us.gcr.io/broad-dsp-lrma/lr-utils:0.1.9"
            preemptible: 1
            memory: "4 GB"
     }
