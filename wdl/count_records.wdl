@@ -18,6 +18,7 @@ task count {
         File bamfile
     }
     command {
+        set -euxo pipefail
         samtools view -c "~{bamfile}" > "counts_out.txt"
     }
     output {
