@@ -218,14 +218,6 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
         de_novo_gene_id_to_canonical_gene_name_dict = dict()
         for de_novo_gene_id, canonical_gene_id, canonical_gene_name in zip(de_novo_gene_ids, gene_ids, gene_names):
             if de_novo_gene_id != canonical_gene_id:
-                # if de_novo_gene_id in de_novo_gene_id_to_canonical_gene_name_dict:
-                #     if de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id][0][0] != canonical_gene_id:
-                #         print(de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id][0])
-                #         raise RuntimeError(
-                #             f"ALREADY HAVE A MAPPING FOR: {de_novo_gene_id}: "
-                #             f"{de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id]}.  "
-                #             f"Got: {(canonical_gene_id, canonical_gene_name)}"
-                #         )
                 try:
                     de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id].append((canonical_gene_id, canonical_gene_name))
                 except KeyError:
@@ -253,11 +245,32 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
                         except KeyError:
                             gene_info_tuple_count_dict[canonical_gene_id] = 1
                     for canonical_gene_id, canonical_gene_name in set(gene_info_tuple_list):
-                        print(f"        {canonical_gene_id} -> {canonical_gene_name} ({gene_info_tuple_count_dict[canonical_gene_id]}x)")
+                        print(f"        {canonical_gene_id} -> {canonical_gene_name} ({gene_info_tuple_count_dict[canonical_gene_id]})")
                     ambiguous_de_novo_gene_set.add(de_novo_gene_id)
         print(f"Num ambiguously / multi-mapped = {multimapped}")
 
         is_gene_id_ambiguous = [True if dngid in ambiguous_de_novo_gene_set else False for dngid in de_novo_gene_ids]
+
+        # Now let's relabel the genes we know are not ambiguous:
+        print("Relabeling unambiguous gene IDs and names...")
+        num_relabeled = 0
+        for i in range(len(is_de_novo)):
+            if is_de_novo[i] and not is_gene_id_ambiguous[i]:
+                de_novo_gene_id = de_novo_gene_ids[i]
+
+                fixed_gene_id = None
+                fixed_gene_name = None
+                try:
+                    fixed_gene_id = de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id][0][0]
+                    fixed_gene_name = de_novo_gene_id_to_canonical_gene_name_dict[de_novo_gene_id][0][1]
+                except KeyError:
+                    pass
+
+                if fixed_gene_id and fixed_gene_name:
+                    gene_ids[i] = fixed_gene_id
+                    gene_names[i] = fixed_gene_name
+                    num_relabeled += 1
+        print(f"Successfully relabeled {num_relabeled} unambiguous gene names / IDs")
 
         # Let downstream processing know we're not gencode:
         is_gencode = False
