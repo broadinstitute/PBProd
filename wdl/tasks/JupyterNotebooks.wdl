@@ -220,6 +220,9 @@ task PB10xMasSeqSingleFlowcellReport {
         # Create a tar.gz of the figures directory:
         tar -zcf figures.tar.gz figures
 
+        # Create a dummy pickle for process safety:
+        touch dummy.pickle
+
         # Stop the memory daemon softly.  Then stop it hard if it's not cooperating:
         set +e
         DO_MEMORY_LOG=false
@@ -235,6 +238,8 @@ task PB10xMasSeqSingleFlowcellReport {
         File html_report = html_out
         File figures_tar_gz = "figures.tar.gz"
         File generated_config = "mas-seq_qc_inputs.config"
+
+        Array[File] pickles = glob("*.pickle")
     }
 
     #########################

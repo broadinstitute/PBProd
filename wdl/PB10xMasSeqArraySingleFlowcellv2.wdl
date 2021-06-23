@@ -882,6 +882,13 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             keyfile = t_61_GenerateStaticReport.html_report
     }
 
+    call FF.FinalizeToDir as t_73_FinalizeReportPickles {
+        input:
+            files = t_61_GenerateStaticReport.pickles,
+            outdir = report_dir,
+            keyfile = t_61_GenerateStaticReport.html_report
+    }
+
     ##############################################################################################################
     # Write out completion file so in the future we can be 100% sure that this run was good:
     call FF.WriteCompletionFile as t_73_WriteCompletionFile {
