@@ -15,39 +15,44 @@ from tqdm import tqdm
 
 TX_ENTRY_STRING = "transcript"
 
-GENE_NAME_FIELD = "gene_name"
 GENE_ID_FIELD = "gene_id"
-TX_NAME_FIELD = "transcript_name"
 TX_ID_FIELD = "transcript_id"
+
+GENCODE_GENE_NAME_FIELD = "gene_name"
+GENCODE_TX_NAME_FIELD = "transcript_name"
+
+STRINGTIE_GENE_ID_FIELD = "ref_gene_id"
+STRINGTIE_TX_ID_FIELD = "reference_id"
+STRINGTIE_GENE_NAME_FIELD = "ref_gene_name"
 
 ALT_NAME_SUFFIX = "_PAR_Y"
 
 
-def get_gtf_field_val_dict(gencode_gtf_file, force_rebuild=False):
+def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
 
     global TX_ENTRY_STRING
-    global GENE_NAME_FIELD
+    global GENCODE_GENE_NAME_FIELD
     global GENE_ID_FIELD
-    global TX_NAME_FIELD
+    global GENCODE_TX_NAME_FIELD
     global TX_ID_FIELD
     global ALT_NAME_SUFFIX
 
     gtf_dict = dict()
 
-    if not os.path.exists(gencode_gtf_file):
-        raise FileNotFoundError(f"Gencode GTF file does not exist: {gencode_gtf_file}")
+    if not os.path.exists(gtf_file):
+        raise FileNotFoundError(f"GTF file does not exist: {gtf_file}")
 
-    pickle_file_name = os.path.splitext(os.path.basename(gencode_gtf_file))[0] + ".big_map.pickle"
+    pickle_file_name = os.path.splitext(os.path.basename(gtf_file))[0] + ".big_map.pickle"
 
     if not force_rebuild and os.path.exists(pickle_file_name):
-        print(f"Loading gencode map from {pickle_file_name}...", end="\t", file=sys.stderr)
+        print(f"Loading GTF field map from {pickle_file_name}...", end="\t", file=sys.stderr)
         gtf_dict = pickle.load(open(pickle_file_name, "rb"))
         print("Done!", file=sys.stderr)
     else:
-        print(f"Creating master GTF field map keyed by transcript ID using {gencode_gtf_file}...",
+        print(f"Creating master GTF field map keyed by transcript ID using {gtf_file}...",
               flush=True, file=sys.stderr)
 
-        with open(gencode_gtf_file, "r") as f, tqdm(desc="Processing Gencode File", unit="line") as pbar:
+        with open(gtf_file, "r") as f, tqdm(desc="Processing GTF File", unit=" line") as pbar:
             tsv_file = csv.reader(f, delimiter="\t")
             for row in tsv_file:
                 # Ignore comments and make sure we only process transcript entries:
@@ -60,8 +65,8 @@ def get_gtf_field_val_dict(gencode_gtf_file, force_rebuild=False):
 
                     # Make sure our names are unique:
                     if row_data_dict[TX_ID_FIELD].endswith(ALT_NAME_SUFFIX):
-                        row_data_dict[TX_NAME_FIELD] = row_data_dict[TX_NAME_FIELD] + ALT_NAME_SUFFIX
-                        row_data_dict[GENE_NAME_FIELD] = row_data_dict[GENE_NAME_FIELD] + ALT_NAME_SUFFIX
+                        row_data_dict[GENCODE_TX_NAME_FIELD] = row_data_dict[GENCODE_TX_NAME_FIELD] + ALT_NAME_SUFFIX
+                        row_data_dict[GENCODE_GENE_NAME_FIELD] = row_data_dict[GENCODE_GENE_NAME_FIELD] + ALT_NAME_SUFFIX
 
                     # Add this row to our dict keyed by transcript ID:
                     gtf_dict[row_data_dict[TX_ID_FIELD]] = row_data_dict
@@ -84,10 +89,14 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     Rows = cell barcodes (observations)
     data = counts"""
 
-    global GENE_NAME_FIELD
+    global GENCODE_GENE_NAME_FIELD
     global GENE_ID_FIELD
-    global TX_NAME_FIELD
+    global GENCODE_TX_NAME_FIELD
     global TX_ID_FIELD
+
+    global STRINGTIE_GENE_ID_FIELD
+    global STRINGTIE_TX_ID_FIELD
+    global STRINGTIE_GENE_NAME_FIELD
 
     cell_barcode_to_tx_to_umi_dict = dict()
     cell_barcode_to_tx_count_dict = dict()
@@ -100,12 +109,16 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
         print("Done!", file=sys.stderr)
     else:
         # Get our cell tx counts:
-        with open(input_tsv, "r") as f, tqdm(desc="Processing Raw Cell Counts", unit="count") as pbar:
+        with open(input_tsv, "r") as f, tqdm(desc="Processing Raw Cell Counts", unit=" count") as pbar:
             tsv_file = csv.reader(f, delimiter="\t")
             next(tsv_file)
             for row in tsv_file:
                 tx_col = row[0]
-                tx_id = tx_col[:tx_col.find("|")]
+                pipe_pos = tx_col.find("|")
+                if pipe_pos >= 0:
+                    tx_id = tx_col[:tx_col.find("|")]
+                else:
+                    tx_id = tx_col
 
                 cell_barcode = row[1]
                 umi = row[2]
@@ -147,7 +160,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     count_mat = scipy.sparse.lil_matrix((len(cell_barcodes), len(tx_ids)), dtype=np.uint32)
 
     tx_id_index_dict = {name: i for i, name in enumerate(tx_ids)}
-    with tqdm(desc=f"Creating cell transcript count matrix", unit="cell",
+    with tqdm(desc=f"Creating cell transcript count matrix", unit=" cell",
               total=len(cell_barcode_to_tx_count_dict)) as pbar:
 
         for i, (cb, counts_dict) in enumerate(cell_barcode_to_tx_count_dict.items()):
@@ -157,22 +170,60 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
             pbar.update(1)
 
     # Now we set up the variables that we're going to apply to each observation:
-    transcript_names = [gtf_field_dict[tx_id][TX_NAME_FIELD] for tx_id in tx_ids]
-    gene_ids = [gtf_field_dict[tx_id][GENE_ID_FIELD] for tx_id in tx_ids]
-    gene_names = [gtf_field_dict[tx_id][GENE_NAME_FIELD] for tx_id in tx_ids]
+    # We'll try two different ways - one for Gencode GTFs and one for stringtie GTFs:
+
+    is_gencode = True
+    try:
+        # Try Gencode first:
+        transcript_names = [gtf_field_dict[tx_id][GENCODE_TX_NAME_FIELD] for tx_id in tx_ids]
+        gene_names = [gtf_field_dict[tx_id][GENCODE_GENE_NAME_FIELD] for tx_id in tx_ids]
+        gene_ids = [gtf_field_dict[tx_id][GENE_ID_FIELD] for tx_id in tx_ids]
+
+        de_novo_gene_ids = ["N/A"] * len(transcript_names)
+        de_novo_transcript_ids = ["N/A"] * len(transcript_names)
+        is_de_novo = [False] * len(transcript_names)
+
+    except KeyError:
+        # We must have stringtie data:
+
+        de_novo_transcript_ids = tx_ids
+        de_novo_gene_ids = [gtf_field_dict[tx_id][GENE_ID_FIELD] for tx_id in tx_ids]
+
+        # TX Names for stringtie are the same as TX IDs:
+        transcript_names = tx_ids
+
+        # Get our fields for existing transcripts:
+        gene_names = [gtf_field_dict[tx_id][STRINGTIE_GENE_NAME_FIELD] if STRINGTIE_GENE_NAME_FIELD in gtf_field_dict[tx_id] else gtf_field_dict[tx_id][GENE_ID_FIELD] for tx_id in tx_ids]
+        gene_ids = [gtf_field_dict[tx_id][STRINGTIE_GENE_ID_FIELD] if STRINGTIE_GENE_ID_FIELD in gtf_field_dict[tx_id] else gtf_field_dict[tx_id][GENE_ID_FIELD] for tx_id in tx_ids]
+
+        # Get our new transcript ids last so we can cue off of them earlier:
+        tx_ids = [gtf_field_dict[tx_id][STRINGTIE_TX_ID_FIELD] if STRINGTIE_GENE_NAME_FIELD in gtf_field_dict[tx_id] else tx_id for tx_id in tx_ids]
+
+        # Mark or de novo transcripts:
+        is_de_novo = [tx_ids[i] == de_novo_transcript_ids[i] for i in range(len(tx_ids))]
+
+        is_gencode = False
 
     # Create our anndata object now:
     count_adata = anndata.AnnData(count_mat.tocsr())
 
     # Add our variables:
     col_df = pd.DataFrame()
-    col_df["transcript_names"] = transcript_names
     col_df["transcript_ids"] = tx_ids
-    col_df["gene_names"] = gene_names
     col_df["gene_ids"] = gene_ids
+    col_df["gene_names"] = gene_names
+    col_df["transcript_names"] = transcript_names
+
+    col_df["de_novo_gene_ids"] = de_novo_gene_ids
+    col_df["de_novo_transcript_ids"] = de_novo_transcript_ids
+    col_df["is_de_novo"] = is_de_novo
 
     count_adata.var = col_df
-    count_adata.var_names = transcript_names
+
+    if is_gencode:
+        count_adata.var_names = transcript_names
+    else:
+        count_adata.var_names = tx_ids
 
     # Add our observations:
     row_df = pd.DataFrame()
@@ -184,11 +235,11 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     return count_adata
 
 
-def main(input_tsv, gencode_gtf, out_prefix):
+def main(input_tsv, gtf_file, out_prefix):
 
     print("Verifying input file(s) exist...", file=sys.stderr)
     files_ok = True
-    for f in [input_tsv, gencode_gtf]:
+    for f in [input_tsv, gtf_file]:
         if not os.path.exists(f):
             print(f"ERROR: Input file does not exist: {f}", file=sys.stderr)
             files_ok = False
@@ -196,8 +247,8 @@ def main(input_tsv, gencode_gtf, out_prefix):
         sys.exit(1)
     print("Input files verified.", file=sys.stderr)
 
-    # Create our gencode map:
-    gtf_field_dict = get_gtf_field_val_dict(gencode_gtf)
+    # Create our gtf field map:
+    gtf_field_dict = get_gtf_field_val_dict(gtf_file)
 
     # Create our anndata objects from the given data:
     print("Creating master anndata objects from transcripts counts data...", file=sys.stderr)
@@ -228,7 +279,7 @@ if __name__ == "__main__":
                                help='TSV file containing gene/transcript counts.',
                                required=True)
     requiredNamed.add_argument('-g', '--gtf',
-                               help='Gencode GTF file containing gene annotations.',
+                               help='GTF file containing gene annotations.  Can be from either Gencode or stringtie.',
                                required=True)
     requiredNamed.add_argument('-o', '--out-base-name',
                                help='Base name for the output files',
