@@ -128,7 +128,7 @@ task CreateCountMatrixAnndataFromTsv {
 
     output {
         File transcript_gene_count_anndata_h5ad = "~{prefix}_tx_gene_counts_adata.h5ad"
-        File transcript_gene_count_anndata_pickle = "~{prefix}_tx_gene_counts_adata.pickle"
+        Array[File] pickles = glob("*.pickle")
     }
 
     #########################
