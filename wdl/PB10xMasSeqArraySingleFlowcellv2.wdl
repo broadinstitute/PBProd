@@ -394,6 +394,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 input:
                     bam_file = tenx_annotated_bam,
                     starcode_seeds_tsv = t_33_ConsolidateBarcodeCountsForStarcode.merged_counts,
+                    whitelist_10x = ten_x_cell_barcode_whitelist,
                     prefix = SM + "_array_elements"
             }
         }
