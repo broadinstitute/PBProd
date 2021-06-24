@@ -856,13 +856,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 files = select_all([
                     t_58_CreateCountMatrixAnndataFromTsv.transcript_gene_count_anndata_h5ad,
+                    t_58_CreateCountMatrixAnndataFromTsv.transcript_gene_count_anndata_pickle,
                 ]),
-                outdir = quant_dir,
-                keyfile = t_61_GenerateStaticReport.html_report
-        }
-        call FF.FinalizeToDir as t_71_FinalizeProcessedQuantResultPickles {
-            input:
-                files = t_58_CreateCountMatrixAnndataFromTsv.pickles,
                 outdir = quant_dir,
                 keyfile = t_61_GenerateStaticReport.html_report
         }
