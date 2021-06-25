@@ -135,12 +135,8 @@ workflow CallVariants {
     }
 
     output {
-        File dvp_phased_vcf = MergeDeepVariantPhasedVCFs.vcf
-        File dvp_phased_tbi = MergeDeepVariantPhasedVCFs.tbi
-        File dvp_g_vcf = MergeDeepVariantGVCFs.vcf
-        File dvp_g_tbi = MergeDeepVariantGVCFs.tbi
-        File dvp_vcf = MergeDeepVariantVCFs.vcf
-        File dvp_tbi = MergeDeepVariantVCFs.tbi
+        File
+
 
         File pbsv_vcf = MergePBSVVCFs.vcf
         File sniffles_vcf = MergeSnifflesVCFs.vcf
