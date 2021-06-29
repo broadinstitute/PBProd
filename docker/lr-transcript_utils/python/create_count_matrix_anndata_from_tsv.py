@@ -15,6 +15,10 @@ from tqdm import tqdm
 
 TX_ENTRY_STRING = "transcript"
 
+CONTIG_FIELD = "contig"
+START_FIELD = "start"
+END_FIELD = "end"
+
 GENE_ID_FIELD = "gene_id"
 TX_ID_FIELD = "transcript_id"
 
@@ -36,6 +40,10 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
     global GENCODE_TX_NAME_FIELD
     global TX_ID_FIELD
     global ALT_NAME_SUFFIX
+
+    global CONTIG_FIELD
+    global START_FIELD
+    global END_FIELD
 
     gtf_dict = dict()
 
@@ -61,7 +69,11 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
                     # Parse the row data into a dict and make sure we're only looking at protein coding rows:
                     row_data_dict = {
                         field.strip().split(" ")[0].replace('"', ""): field.strip().split(" ")[1].replace('"', "") for
-                        field in row[8].split(";") if len(field) != 0}
+                        field in row[8].split(";") if len(field) != 0
+                    }
+                    row_data_dict[CONTIG_FIELD] = row[0]
+                    row_data_dict[START_FIELD] = row[4]
+                    row_data_dict[END_FIELD] = row[5]
 
                     # Make sure our names are unique:
                     if row_data_dict[TX_ID_FIELD].endswith(ALT_NAME_SUFFIX):
@@ -80,7 +92,23 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
     return gtf_dict
 
 
-def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
+def intervals_overlap(contig, start, end, contig2, start2, end2):
+    if contig == contig2:
+        if (start <= start2 <= end) or (start <= end2 <= end):
+            return True
+    return False
+
+
+def interval_overlaps_any_in_interval_list(contig, start, end, interval_list):
+    for contig2, start2, end2 in interval_list:
+        if intervals_overlap(contig, start, end, contig2, start2, end2):
+            return True
+    return False
+
+
+def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
+                            overlap_intervals_label="overlaps_intervals_of_interest", force_recount=False):
+
     """Create an anndata object holding the given gene/transcript information.
     NOTE: This MUST be a sparse matrix - we got lots of data here.
 
@@ -97,6 +125,10 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     global STRINGTIE_GENE_ID_FIELD
     global STRINGTIE_TX_ID_FIELD
     global STRINGTIE_GENE_NAME_FIELD
+
+    global CONTIG_FIELD
+    global START_FIELD
+    global END_FIELD
 
     cell_barcode_to_tx_to_umi_dict = dict()
     cell_barcode_to_tx_count_dict = dict()
@@ -275,6 +307,17 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
         # Let downstream processing know we're not gencode:
         is_gencode = False
 
+    # Mark the transcripts that overlap our intervals:
+    if overlap_intervals:
+        tx_overlap_flags = [
+            interval_overlaps_any_in_interval_list(
+                gtf_field_dict[tx_id][CONTIG_FIELD],
+                gtf_field_dict[tx_id][START_FIELD],
+                gtf_field_dict[tx_id][END_FIELD],
+                overlap_intervals
+            ) for tx_id in tx_ids
+        ]
+
     # Create our anndata object now:
     count_adata = anndata.AnnData(count_mat.tocsr())
 
@@ -289,6 +332,10 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     col_df["de_novo_transcript_ids"] = de_novo_transcript_ids
     col_df["is_de_novo"] = is_de_novo
     col_df["is_gene_id_ambiguous"] = is_gene_id_ambiguous
+
+    # If we're doing interval overlaps, add our label:
+    if overlap_intervals:
+        col_df[f"{overlap_intervals_label}"] = tx_overlap_flags
 
     count_adata.var = col_df
 
@@ -307,16 +354,39 @@ def create_combined_anndata(input_tsv, gtf_field_dict, force_recount=False):
     return count_adata
 
 
-def main(input_tsv, gtf_file, out_prefix):
+def read_intervals_from_tsv(filename):
+    with open(filename, "r") as f, tqdm(desc="Processing intervals file", unit=" line") as pbar:
+        intervals = []
+        tsv_file = csv.reader(f, delimiter="\t")
+        for row in tsv_file:
+            if (not row[0].startswith("#")) and (not row[0].startswith("@")):
+                contig = row[0]
+                start = row[1]
+                end = row[2]
+                intervals.append((contig, start, end))
+            pbar.update(1)
+    return intervals
+
+
+def main(input_tsv, gtf_file, out_prefix, overlap_interval_filename=None, overlap_intervals_label=None):
 
     print("Verifying input file(s) exist...", file=sys.stderr)
     files_ok = True
-    for f in [input_tsv, gtf_file]:
+    files_to_check = [input_tsv, gtf_file]
+    if overlap_interval_filename:
+        files_to_check.append(overlap_interval_filename)
+    for f in files_to_check:
         if not os.path.exists(f):
             print(f"ERROR: Input file does not exist: {f}", file=sys.stderr)
             files_ok = False
     if not files_ok:
         sys.exit(1)
+
+    overlap_intervals = None
+    if overlap_interval_filename:
+        print("Verifying contents of {overlap_interval_filename}...")
+        overlap_intervals = read_intervals_from_tsv(overlap_interval_filename)
+
     print("Input files verified.", file=sys.stderr)
 
     # Create our gtf field map:
@@ -324,7 +394,7 @@ def main(input_tsv, gtf_file, out_prefix):
 
     # Create our anndata objects from the given data:
     print("Creating master anndata objects from transcripts counts data...", file=sys.stderr)
-    master_adata = create_combined_anndata(input_tsv, gtf_field_dict)
+    master_adata = create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals, overlap_intervals_label)
 
     # Write our data out as pickles:
     print("Pickling data...", file=sys.stderr)
@@ -357,5 +427,13 @@ if __name__ == "__main__":
                                help='Base name for the output files',
                                required=True)
 
+    parser.add_argument("--overlap-intervals", 
+                        help="TSV/Interval list file containing intervals on which to mark transcripts as overlapping.",
+                        type=str)
+    parser.add_argument("--overlap-interval-label", 
+                        help="Label to add to all overlapping intervals.", 
+                        type=str, 
+                        default="")
+
     args = parser.parse_args()
-    main(args.tsv, args.gtf, args.out_base_name)
+    main(args.tsv, args.gtf, args.out_base_name, args.overlap_intervals, args.overlap_interval_label)
