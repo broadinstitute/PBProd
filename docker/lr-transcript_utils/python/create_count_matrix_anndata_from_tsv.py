@@ -94,7 +94,7 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
 
 def intervals_overlap(contig, start, end, contig2, start2, end2):
     if contig == contig2:
-        if (start <= start2 <= end) or (start <= end2 <= end):
+        if (start <= start2 <= end) or (start <= end2 <= end) or (start2 <= start and end2 >= end):
             return True
     return False
 
