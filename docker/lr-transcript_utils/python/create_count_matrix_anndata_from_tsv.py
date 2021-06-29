@@ -368,8 +368,8 @@ def read_intervals_from_tsv(filename):
             if (not row[0].startswith("#")) and (not row[0].startswith("@")):
                 try:
                     contig = row[0]
-                    start = row[1]
-                    end = row[2]
+                    start = int(row[1])
+                    end = int(row[2])
                     intervals.append((contig, start, end))
                 except IndexError:
                     print("ERROR: Input interval file does not seem to be a properly formatted TSV.  "
