@@ -72,8 +72,8 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
                         field in row[8].split(";") if len(field) != 0
                     }
                     row_data_dict[CONTIG_FIELD] = row[0]
-                    row_data_dict[START_FIELD] = row[4]
-                    row_data_dict[END_FIELD] = row[5]
+                    row_data_dict[START_FIELD] = int(row[4])
+                    row_data_dict[END_FIELD] = int(row[5])
 
                     # Make sure our names are unique:
                     if row_data_dict[TX_ID_FIELD].endswith(ALT_NAME_SUFFIX):
