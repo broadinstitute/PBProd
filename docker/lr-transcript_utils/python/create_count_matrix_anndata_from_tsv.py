@@ -214,6 +214,18 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
     # Now we set up the variables that we're going to apply to each observation:
     # We'll try two different ways - one for Gencode GTFs and one for stringtie GTFs:
 
+    # First we handle our overlapping tests:
+    # Mark the transcripts that overlap our intervals:
+    if overlap_intervals:
+        tx_overlap_flags = [
+            interval_overlaps_any_in_interval_list(
+                gtf_field_dict[tx_id][CONTIG_FIELD],
+                gtf_field_dict[tx_id][START_FIELD],
+                gtf_field_dict[tx_id][END_FIELD],
+                overlap_intervals
+            ) for tx_id in tx_ids
+        ]
+
     is_gencode = True
     try:
         # Try Gencode first:
@@ -307,17 +319,6 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
         # Let downstream processing know we're not gencode:
         is_gencode = False
 
-    # Mark the transcripts that overlap our intervals:
-    if overlap_intervals:
-        tx_overlap_flags = [
-            interval_overlaps_any_in_interval_list(
-                gtf_field_dict[tx_id][CONTIG_FIELD],
-                gtf_field_dict[tx_id][START_FIELD],
-                gtf_field_dict[tx_id][END_FIELD],
-                overlap_intervals
-            ) for tx_id in tx_ids
-        ]
-
     # Create our anndata object now:
     count_adata = anndata.AnnData(count_mat.tocsr())
 
@@ -360,11 +361,15 @@ def read_intervals_from_tsv(filename):
         tsv_file = csv.reader(f, delimiter="\t")
         for row in tsv_file:
             if (not row[0].startswith("#")) and (not row[0].startswith("@")):
-                print(row)
-                contig = row[0]
-                start = row[1]
-                end = row[2]
-                intervals.append((contig, start, end))
+                try:
+                    contig = row[0]
+                    start = row[1]
+                    end = row[2]
+                    intervals.append((contig, start, end))
+                except IndexError:
+                    print("ERROR: Input interval file does not seem to be a properly formatted TSV.  "
+                          "It must have the format: CONTIG    START    END", file=sys.stderr)
+                    sys.exit(1)
             pbar.update(1)
     return intervals
 
