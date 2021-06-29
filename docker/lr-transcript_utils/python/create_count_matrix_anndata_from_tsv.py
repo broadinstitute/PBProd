@@ -217,7 +217,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
     # First we handle our overlapping tests:
     # Mark the transcripts that overlap our intervals:
     if overlap_intervals:
-        print(f"Determining overlap intervals for the given interval list...")
+        print(f"Determining overlap intervals for the given interval list... ", end="", file=sys.stderr)
         tx_overlap_flags = [
             interval_overlaps_any_in_interval_list(
                 gtf_field_dict[tx_id][CONTIG_FIELD],
@@ -226,6 +226,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
                 overlap_intervals
             ) for tx_id in tx_ids
         ]
+        print("Done!", file=sys.stderr)
 
     is_gencode = True
     try:
@@ -270,7 +271,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
                         [(canonical_gene_id, canonical_gene_name)]
 
         # Make sure we don't have any ambiguous mappings:
-        print("Ambiguously / multi-mapped:")
+        print("Ambiguously / multi-mapped:", file=sys.stderr)
         multimapped = 0
         ambiguous_de_novo_gene_set = set()
         for de_novo_gene_id, gene_info_tuple_list in de_novo_gene_id_to_canonical_gene_name_dict.items():
@@ -292,12 +293,12 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
                     for canonical_gene_id, canonical_gene_name in set(gene_info_tuple_list):
                         print(f"        {canonical_gene_id} -> {canonical_gene_name} ({gene_info_tuple_count_dict[canonical_gene_id]})")
                     ambiguous_de_novo_gene_set.add(de_novo_gene_id)
-        print(f"Num ambiguously / multi-mapped = {multimapped}")
+        print(f"Num ambiguously / multi-mapped = {multimapped}", file=sys.stderr)
 
         is_gene_id_ambiguous = [True if dngid in ambiguous_de_novo_gene_set else False for dngid in de_novo_gene_ids]
 
         # Now let's relabel the genes we know are not ambiguous:
-        print("Relabeling unambiguous gene IDs and names...")
+        print("Relabeling unambiguous gene IDs and names...", end="", file=sys.stderr)
         num_relabeled = 0
         for i in range(len(is_de_novo)):
             if is_de_novo[i] and not is_gene_id_ambiguous[i]:
@@ -315,7 +316,8 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
                     gene_ids[i] = fixed_gene_id
                     gene_names[i] = fixed_gene_name
                     num_relabeled += 1
-        print(f"Successfully relabeled {num_relabeled} unambiguous gene names / IDs")
+        print("Done!", file=sys.stderr)
+        print(f"Successfully relabeled {num_relabeled} unambiguous gene names / IDs", file=sys.stderr)
 
         # Let downstream processing know we're not gencode:
         is_gencode = False
@@ -337,8 +339,9 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
 
     # If we're doing interval overlaps, add our label:
     if overlap_intervals:
-        print(f"Adding {overlap_intervals_label} column for overlapping intervals...")
+        print(f"Adding {overlap_intervals_label} column for overlapping intervals...", file=sys.stderr)
         col_df[f"{overlap_intervals_label}"] = tx_overlap_flags
+        print("Done!", file=sys.stderr)
 
     count_adata.var = col_df
 
