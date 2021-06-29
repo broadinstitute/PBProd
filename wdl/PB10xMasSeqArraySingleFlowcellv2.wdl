@@ -49,6 +49,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         File jupyter_template_static = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/MAS-seq_QC_report_template-static.ipynb"
         File workflow_dot_file = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/PB10xMasSeqArraySingleFlowcellv2.dot"
 
+        File intervals_of_interest = "gs://broad-dsde-methods-long-reads/resources/MASseq_0.0.2/gencode.37.TCR_intervals.tsv"
+        String interval_overlap_name = "is_tcr_overlapping"
+
         File? illumina_barcoded_bam
 
         # Default here is 0 because ccs uncorrected reads all seem to have RQ = -1.
@@ -87,6 +90,9 @@ workflow PB10xMasSeqSingleFlowcellv2 {
 
         jupyter_template_static : "Jupyter notebook / ipynb file containing a template for the QC report which will contain static plots.  This should contain the same information as the jupyter_template_interactive file, but with static images."
         workflow_dot_file : "DOT file containing the representation of this WDL to be included in the QC reports.  This can be generated with womtool."
+
+        intervals_of_interest : "[optional] An interval list file containing intervals to mark in the final anndata object as overlapping the transcripts.  Defaults to a T-cell receptor interval list."
+        interval_overlap_name : "[optional] The name of the annotation to add to the final anndata object for the column containing the overlap flag for transcripts that overlap intervals in the given intervals_of_interest file.  Default: is_tcr_overlapping"
 
         illumina_barcoded_bam : "[optional] Illumina short reads file from a replicate of this same sample.  Used to perform cell barcode corrections."
 
@@ -625,6 +631,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             input:
                 count_matrix_tsv = t_57_CreateCountMatrixFromAnnotatedBam.count_matrix,
                 gencode_gtf_file = genome_annotation_gtf,
+                overlap_intervals = intervals_of_interest,
+                overlap_interval_label = interval_overlap_name,
                 prefix = "~{SM}_~{ID}_gene_tx_expression_count_matrix"
         }
     }
