@@ -72,8 +72,8 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
                         field in row[8].split(";") if len(field) != 0
                     }
                     row_data_dict[CONTIG_FIELD] = row[0]
-                    row_data_dict[START_FIELD] = int(row[4])
-                    row_data_dict[END_FIELD] = int(row[5])
+                    row_data_dict[START_FIELD] = int(row[3])
+                    row_data_dict[END_FIELD] = int(row[4])
 
                     # Make sure our names are unique:
                     if row_data_dict[TX_ID_FIELD].endswith(ALT_NAME_SUFFIX):
@@ -211,6 +211,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
         pickle.dump(count_mat, open(pickle_file_name, "wb"))
         print("Done!", file=sys.stderr)
 
+    ############################################################################################################
     # Now we set up the variables that we're going to apply to each observation:
     # We'll try two different ways - one for Gencode GTFs and one for stringtie GTFs:
 
