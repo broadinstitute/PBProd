@@ -360,6 +360,7 @@ def read_intervals_from_tsv(filename):
         tsv_file = csv.reader(f, delimiter="\t")
         for row in tsv_file:
             if (not row[0].startswith("#")) and (not row[0].startswith("@")):
+                print(row)
                 contig = row[0]
                 start = row[1]
                 end = row[2]
