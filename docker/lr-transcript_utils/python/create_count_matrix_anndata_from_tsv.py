@@ -217,6 +217,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
     # First we handle our overlapping tests:
     # Mark the transcripts that overlap our intervals:
     if overlap_intervals:
+        print(f"Determining overlap intervals for the given interval list...")
         tx_overlap_flags = [
             interval_overlaps_any_in_interval_list(
                 gtf_field_dict[tx_id][CONTIG_FIELD],
@@ -336,6 +337,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
 
     # If we're doing interval overlaps, add our label:
     if overlap_intervals:
+        print(f"Adding {overlap_intervals_label} column for overlapping intervals...")
         col_df[f"{overlap_intervals_label}"] = tx_overlap_flags
 
     count_adata.var = col_df
