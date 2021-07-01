@@ -13,6 +13,7 @@ import pandas as pd
 
 from tqdm import tqdm
 
+GENE_ENTRY_STRING = "gene"
 TX_ENTRY_STRING = "transcript"
 
 CONTIG_FIELD = "contig"
@@ -32,7 +33,7 @@ STRINGTIE_GENE_NAME_FIELD = "ref_gene_name"
 ALT_NAME_SUFFIX = "_PAR_Y"
 
 
-def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
+def get_gtf_field_val_dict(gtf_file, entry_type_filter=TX_ENTRY_STRING, force_rebuild=False):
 
     global TX_ENTRY_STRING
     global GENCODE_GENE_NAME_FIELD
@@ -50,7 +51,7 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
     if not os.path.exists(gtf_file):
         raise FileNotFoundError(f"GTF file does not exist: {gtf_file}")
 
-    pickle_file_name = os.path.splitext(os.path.basename(gtf_file))[0] + ".big_map.pickle"
+    pickle_file_name = os.path.splitext(os.path.basename(gtf_file))[0] + f".{entry_type_filter}.big_map.pickle"
 
     if not force_rebuild and os.path.exists(pickle_file_name):
         print(f"Loading GTF field map from {pickle_file_name}...", end="\t", file=sys.stderr)
@@ -64,7 +65,7 @@ def get_gtf_field_val_dict(gtf_file, force_rebuild=False):
             tsv_file = csv.reader(f, delimiter="\t")
             for row in tsv_file:
                 # Ignore comments and make sure we only process transcript entries:
-                if not row[0].startswith("#") and row[2] == TX_ENTRY_STRING:
+                if not row[0].startswith("#") and row[2] == entry_type_filter:
 
                     # Parse the row data into a dict and make sure we're only looking at protein coding rows:
                     row_data_dict = {
@@ -134,13 +135,14 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
             # If we have some overlaps, then we need to mark them:
             if np.any(gencode_overlapping_indices):
 
-                print(f"Genes overlapping [{k} @ {contig}:{start}-{end}]:")
-                for j in gencode_overlapping_indices:
-                    key = gencode_index_name_map[j]
-                    c = gencode_field_val_dict[key][CONTIG_FIELD]
-                    s = gencode_field_val_dict[key][START_FIELD]
-                    e = gencode_field_val_dict[key][END_FIELD]
-                    print(f"\t{j}\t{key}\t{gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]} @ {c}:{s}-{e}")
+                # DEBUGGING:
+                # print(f"Genes overlapping [{k} @ {contig}:{start}-{end}]:")
+                # for j in gencode_overlapping_indices:
+                #     key = gencode_index_name_map[j]
+                #     c = gencode_field_val_dict[key][CONTIG_FIELD]
+                #     s = gencode_field_val_dict[key][START_FIELD]
+                #     e = gencode_field_val_dict[key][END_FIELD]
+                #     print(f"\t{j}\t{key}\t{gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]} @ {c}:{s}-{e}")
 
                 max_gencode_index = 0
                 overlap_fractions = np.zeros(len(gencode_overlapping_indices))
@@ -413,7 +415,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
 
     if gencode_reference_gtf:
         print(f"Adding gencode overlapping gene names...", file=sys.stderr)
-        gencode_field_val_dict = get_gtf_field_val_dict(gencode_reference_gtf)
+        gencode_field_val_dict = get_gtf_field_val_dict(gencode_reference_gtf, entry_type_filter=GENE_ENTRY_STRING)
         print(f"Assigning overlapping genes...", file=sys.stderr)
         gene_assignments, ambiguity_markers = get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict)
         col_df["gencode_overlap_gene_assignments"] = gene_assignments
