@@ -143,13 +143,13 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
             if np.any(gencode_overlapping_indices):
 
                 # DEBUGGING:
-                # print(f"Genes overlapping [{k} @ {contig}:{start}-{end}]:")
-                # for j in gencode_overlapping_indices:
-                #     key = gencode_index_name_map[j]
-                #     c = gencode_field_val_dict[key][CONTIG_FIELD]
-                #     s = gencode_field_val_dict[key][START_FIELD]
-                #     e = gencode_field_val_dict[key][END_FIELD]
-                #     print(f"\t{j}\t{key}\t{gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]} @ {c}:{s}-{e}")
+                print(f"Genes overlapping [{k} @ {contig}:{start}-{end}]:")
+                for j in gencode_overlapping_indices:
+                    key = gencode_index_name_map[j]
+                    c = gencode_field_val_dict[key][CONTIG_FIELD]
+                    s = gencode_field_val_dict[key][START_FIELD]
+                    e = gencode_field_val_dict[key][END_FIELD]
+                    print(f"\t{j}\t{key}\t{gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]} @ {c}:{s}-{e}")
 
                 max_gencode_index = 0
                 overlap_fractions = np.zeros(len(gencode_overlapping_indices))
