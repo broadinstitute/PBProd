@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+import math
 import os
 import sys
 import argparse
@@ -106,8 +106,59 @@ def interval_overlaps_any_in_interval_list(contig, start, end, interval_list):
     return False
 
 
+def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict, overlap_threshold=0.1):
+    gene_assignments = np.empty(len(gtf_field_dict), dtype=str)
+    ambiguity_markers = np.empty(len(gtf_field_dict), dtype=bool)
+
+    # Make structures here that will allow fast search:
+    gencode_contigs = np.array([f[CONTIG_FIELD] for f in gencode_field_val_dict.values()])
+    gencode_starts = np.array([f[START_FIELD] for f in gencode_field_val_dict.values()])
+    gencode_ends = np.array([f[END_FIELD] for f in gencode_field_val_dict.values()])
+
+    for i, (k, v) in enumerate(gtf_field_dict.items()):
+        contig = v[CONTIG_FIELD]
+        start = v[START_FIELD]
+        end = v[END_FIELD]
+
+        # now we test for inclusion:
+        gencode_overlapping_indices = np.where(
+            (contig == gencode_contigs) &
+            (((gencode_starts <= start) & (start <= gencode_ends)) |
+             ((gencode_starts <= end) & (end <= gencode_ends)) |
+             ((start <= gencode_starts) & (gencode_ends <= end)))
+        )
+
+        # If we have some overlaps, then we need to mark them:
+        if np.any(gencode_overlapping_indices):
+            max_gencode_index = 0
+            overlap_fractions = np.zeros(len(gencode_overlapping_indices))
+            for j, overlap_index in enumerate(gencode_overlapping_indices):
+                # Determine the amount of overlap in the two ranges:
+                overlap_start = max(start, gencode_starts[overlap_index])
+                overlap_end = min(end, gencode_ends[overlap_index])
+                overlap_fractions[j] = (overlap_end - overlap_start) / \
+                                       (gencode_ends[overlap_index] - gencode_starts[overlap_index])
+
+                # Store the max here to make it a little faster:
+                if overlap_fractions[j] > overlap_fractions[max_gencode_index]:
+                    max_gencode_index = j
+
+            # Set our gene as the one with the most overlap:
+            gene_assignments[i] = gencode_field_val_dict.values()[gencode_overlapping_indices[max_gencode_index]][GENCODE_GENE_NAME_FIELD]
+            ambiguity_markers[i] = (min(overlap_fractions) / max(overlap_fractions) > overlap_threshold)
+        else:
+            # We have no existing transcripts for which to add annotations.
+            # We must add the label of the de-novo gene name and mark as unambiguous:
+            gene_assignments[i] = v[GENCODE_GENE_NAME_FIELD]
+            ambiguity_markers[i] = False
+
+    return gene_assignments, ambiguity_markers
+
+
 def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
-                            overlap_intervals_label="overlaps_intervals_of_interest", force_recount=False):
+                            overlap_intervals_label="overlaps_intervals_of_interest",
+                            gencode_reference_gtf=None,
+                            force_recount=False):
 
     """Create an anndata object holding the given gene/transcript information.
     NOTE: This MUST be a sparse matrix - we got lots of data here.
@@ -344,6 +395,15 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
         col_df[f"{overlap_intervals_label}"] = tx_overlap_flags
         print("Done!", file=sys.stderr)
 
+    if gencode_reference_gtf:
+        print(f"Adding gencode overlapping gene names...", file=sys.stderr)
+        gencode_field_val_dict = get_gtf_field_val_dict(gencode_reference_gtf)
+        gene_assignments, ambiguity_markers = get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict)
+        col_df["gencode_overlap_gene_assignments"] = gene_assignments
+        col_df["is_gencode_gene_overlap_ambiguous"] = ambiguity_markers
+        print("Done!", file=sys.stderr)
+
+    # Assign the data to our anndata object:
     count_adata.var = col_df
 
     if is_gencode:
@@ -380,13 +440,16 @@ def read_intervals_from_tsv(filename):
     return intervals
 
 
-def main(input_tsv, gtf_file, out_prefix, overlap_interval_filename=None, overlap_intervals_label=None):
+def main(input_tsv, gtf_file, out_prefix,
+         overlap_interval_filename=None, overlap_intervals_label=None, gencode_reference_gtf=None):
 
     print("Verifying input file(s) exist...", file=sys.stderr)
     files_ok = True
     files_to_check = [input_tsv, gtf_file]
     if overlap_interval_filename:
         files_to_check.append(overlap_interval_filename)
+    if gencode_reference_gtf:
+        files_to_check.append(gencode_reference_gtf)
     for f in files_to_check:
         if not os.path.exists(f):
             print(f"ERROR: Input file does not exist: {f}", file=sys.stderr)
@@ -406,7 +469,9 @@ def main(input_tsv, gtf_file, out_prefix, overlap_interval_filename=None, overla
 
     # Create our anndata objects from the given data:
     print("Creating master anndata objects from transcripts counts data...", file=sys.stderr)
-    master_adata = create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals, overlap_intervals_label)
+    master_adata = create_combined_anndata(
+        input_tsv, gtf_field_dict, overlap_intervals, overlap_intervals_label, gencode_reference_gtf
+    )
 
     # Write our data out as pickles:
     print("Pickling data...", file=sys.stderr)
@@ -447,5 +512,9 @@ if __name__ == "__main__":
                         type=str, 
                         default="")
 
+    parser.add_argument("--gencode-reference-gtf",
+                        help="Gencode GTF file to use to disambiguate the annotations in the given gtf file.",
+                        type=str)
+
     args = parser.parse_args()
-    main(args.tsv, args.gtf, args.out_base_name, args.overlap_intervals, args.overlap_interval_label)
+    main(args.tsv, args.gtf, args.out_base_name, args.overlap_intervals, args.overlap_interval_label, args.gencode_reference_gtf)

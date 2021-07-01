@@ -488,6 +488,71 @@ task FilterReadsBySamFlags {
     }
 }
 
+task DownsampleSam {
+    meta {
+        description : "Downsample the given bam / sam file using Picard/GATK's DownsampleSam tool."
+        author : "Jonn Smith"
+        email : "jonn@broadinstitute.org"
+    }
+
+    input {
+        File bam
+
+        Float probability = 0.01
+        String strategy = "HighAccuracy"
+        String prefix = "downsampled_reads"
+
+        String extra_args = ""
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    parameter_meta {
+        bam:   "BAM file to be filtered."
+        probability : "[Optional] Probability that a read will be emitted (Default: 0.01)."
+        strategy : "[Optional] Strategy to use to downsample the given bam file (Default: HighAccuracy)."
+        prefix : "[Optional] Prefix string to name the output file (Default: downsampled_reads)."
+        extra_args : "[Optional] Extra arguments to pass into DownsampleSam."
+    }
+
+    Int disk_size = 20 + ceil(11 * size(bam, "GiB"))
+
+    command <<<
+
+        # Make sure we use all our proocesors:
+        np=$(cat /proc/cpuinfo | grep ^processor | tail -n1 | awk '{print $NF+1}')
+
+        gatk DownsampleSam -I ~{bam} -O ~{prefix}.bam -S ~{strategy} -P ~{probability} ~{extra_args}
+        samtools index -@$np ~{prefix}.bam
+    >>>
+
+    output {
+        File output_bam = "~{prefix}.bam"
+        File output_bam_index = "~{prefix}.bam.bai"
+    }
+
+    #########################
+    RuntimeAttr default_attr = object {
+        cpu_cores:          1,
+        mem_gb:             2,
+        disk_gb:            disk_size,
+        boot_disk_gb:       10,
+        preemptible_tries:  2,
+        max_retries:        1,
+        docker:             "us.gcr.io/broad-gatk/gatk:4.2.0.0"
+    }
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+    runtime {
+        cpu:                    select_first([runtime_attr.cpu_cores,         default_attr.cpu_cores])
+        memory:                 select_first([runtime_attr.mem_gb,            default_attr.mem_gb]) + " GiB"
+        disks: "local-disk " +  select_first([runtime_attr.disk_gb,           default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb:         select_first([runtime_attr.boot_disk_gb,      default_attr.boot_disk_gb])
+        preemptible:            select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries:             select_first([runtime_attr.max_retries,       default_attr.max_retries])
+        docker:                 select_first([runtime_attr.docker,            default_attr.docker])
+    }
+}
+
 task GrepCountBamRecords {
     input {
         String bam
