@@ -107,7 +107,7 @@ def interval_overlaps_any_in_interval_list(contig, start, end, interval_list):
 
 
 def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict, overlap_threshold=0.1):
-    gene_assignments = np.empty(len(gtf_field_dict), dtype=str)
+    gene_assignments = []
     ambiguity_markers = np.empty(len(gtf_field_dict), dtype=bool)
 
     # Make structures here that will allow fast search:
@@ -148,16 +148,17 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
 
                 # Set our gene as the one with the most overlap:
                 key = gencode_index_name_map[gencode_overlapping_indices[max_gencode_index]]
-                gene_assignments[i] = gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]
+                gene_assignments.append(gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD])
                 ambiguity_markers[i] = (min(overlap_fractions) / max(overlap_fractions) > overlap_threshold)
             else:
                 # We have no existing transcripts for which to add annotations.
                 # We must add the label of the de-novo gene name and mark as unambiguous:
-                gene_assignments[i] = v[GENE_ID_FIELD]
+                gene_assignments.append(v[GENE_ID_FIELD])
                 ambiguity_markers[i] = False
 
             pbar.update(1)
 
+    gene_assignments = np.array(gene_assignments)
     return gene_assignments, ambiguity_markers
 
 
