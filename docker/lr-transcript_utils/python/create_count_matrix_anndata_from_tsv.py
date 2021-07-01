@@ -82,10 +82,15 @@ def get_gtf_field_val_dict(gtf_file, entry_type_filter=TX_ENTRY_STRING, force_re
                             row_data_dict[GENCODE_TX_NAME_FIELD] = row_data_dict[GENCODE_TX_NAME_FIELD] + ALT_NAME_SUFFIX
                             row_data_dict[GENCODE_GENE_NAME_FIELD] = row_data_dict[GENCODE_GENE_NAME_FIELD] + ALT_NAME_SUFFIX
                     except KeyError:
-                        pass
+                        if row_data_dict[GENE_ID_FIELD].endswith(ALT_NAME_SUFFIX):
+                            row_data_dict[GENCODE_TX_NAME_FIELD] = row_data_dict[GENCODE_TX_NAME_FIELD] + ALT_NAME_SUFFIX
+                            row_data_dict[GENCODE_GENE_NAME_FIELD] = row_data_dict[GENCODE_GENE_NAME_FIELD] + ALT_NAME_SUFFIX
 
                     # Add this row to our dict keyed by transcript ID:
-                    gtf_dict[row_data_dict[TX_ID_FIELD]] = row_data_dict
+                    try:
+                        gtf_dict[row_data_dict[TX_ID_FIELD]] = row_data_dict
+                    except KeyError:
+                        gtf_dict[row_data_dict[GENE_ID_FIELD]] = row_data_dict
 
                 pbar.update(1)
 
