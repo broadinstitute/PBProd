@@ -149,7 +149,7 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
         else:
             # We have no existing transcripts for which to add annotations.
             # We must add the label of the de-novo gene name and mark as unambiguous:
-            gene_assignments[i] = v[GENCODE_GENE_NAME_FIELD]
+            gene_assignments[i] = v[GENE_ID_FIELD]
             ambiguity_markers[i] = False
 
     return gene_assignments, ambiguity_markers
@@ -391,7 +391,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
 
     # If we're doing interval overlaps, add our label:
     if overlap_intervals:
-        print(f"Adding {overlap_intervals_label} column for overlapping intervals...", file=sys.stderr)
+        print(f"Adding {overlap_intervals_label} column for overlapping intervals...", file=sys.stderr, end="")
         col_df[f"{overlap_intervals_label}"] = tx_overlap_flags
         print("Done!", file=sys.stderr)
 
