@@ -117,43 +117,46 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
 
     gencode_index_name_map = {i: k for i, k in enumerate(gencode_field_val_dict.keys())}
 
-    for i, (k, v) in enumerate(gtf_field_dict.items()):
-        contig = v[CONTIG_FIELD]
-        start = v[START_FIELD]
-        end = v[END_FIELD]
+    with tqdm(desc="Processing GTF Entries", unit=" entry", total=len(gtf_field_dict)) as pbar:
+        for i, (k, v) in enumerate(gtf_field_dict.items()):
+            contig = v[CONTIG_FIELD]
+            start = v[START_FIELD]
+            end = v[END_FIELD]
 
-        # now we test for inclusion:
-        gencode_overlapping_indices = np.where(
-            (contig == gencode_contigs) &
-            (((gencode_starts <= start) & (start <= gencode_ends)) |
-             ((gencode_starts <= end) & (end <= gencode_ends)) |
-             ((start <= gencode_starts) & (gencode_ends <= end)))
-        )[0]
+            # now we test for inclusion:
+            gencode_overlapping_indices = np.where(
+                (contig == gencode_contigs) &
+                (((gencode_starts <= start) & (start <= gencode_ends)) |
+                 ((gencode_starts <= end) & (end <= gencode_ends)) |
+                 ((start <= gencode_starts) & (gencode_ends <= end)))
+            )[0]
 
-        # If we have some overlaps, then we need to mark them:
-        if np.any(gencode_overlapping_indices):
-            max_gencode_index = 0
-            overlap_fractions = np.zeros(len(gencode_overlapping_indices))
-            for j, overlap_index in enumerate(gencode_overlapping_indices):
-                # Determine the amount of overlap in the two ranges:
-                overlap_start = max(start, gencode_starts[overlap_index])
-                overlap_end = min(end, gencode_ends[overlap_index])
-                overlap_fractions[j] = (overlap_end - overlap_start) / \
-                                       (gencode_ends[overlap_index] - gencode_starts[overlap_index])
+            # If we have some overlaps, then we need to mark them:
+            if np.any(gencode_overlapping_indices):
+                max_gencode_index = 0
+                overlap_fractions = np.zeros(len(gencode_overlapping_indices))
+                for j, overlap_index in enumerate(gencode_overlapping_indices):
+                    # Determine the amount of overlap in the two ranges:
+                    overlap_start = max(start, gencode_starts[overlap_index])
+                    overlap_end = min(end, gencode_ends[overlap_index])
+                    overlap_fractions[j] = (overlap_end - overlap_start) / \
+                                           (gencode_ends[overlap_index] - gencode_starts[overlap_index])
 
-                # Store the max here to make it a little faster:
-                if overlap_fractions[j] > overlap_fractions[max_gencode_index]:
-                    max_gencode_index = j
+                    # Store the max here to make it a little faster:
+                    if overlap_fractions[j] > overlap_fractions[max_gencode_index]:
+                        max_gencode_index = j
 
-            # Set our gene as the one with the most overlap:
-            key = gencode_index_name_map[gencode_overlapping_indices[max_gencode_index]]
-            gene_assignments[i] = gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]
-            ambiguity_markers[i] = (min(overlap_fractions) / max(overlap_fractions) > overlap_threshold)
-        else:
-            # We have no existing transcripts for which to add annotations.
-            # We must add the label of the de-novo gene name and mark as unambiguous:
-            gene_assignments[i] = v[GENE_ID_FIELD]
-            ambiguity_markers[i] = False
+                # Set our gene as the one with the most overlap:
+                key = gencode_index_name_map[gencode_overlapping_indices[max_gencode_index]]
+                gene_assignments[i] = gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]
+                ambiguity_markers[i] = (min(overlap_fractions) / max(overlap_fractions) > overlap_threshold)
+            else:
+                # We have no existing transcripts for which to add annotations.
+                # We must add the label of the de-novo gene name and mark as unambiguous:
+                gene_assignments[i] = v[GENE_ID_FIELD]
+                ambiguity_markers[i] = False
+
+            pbar.update(1)
 
     return gene_assignments, ambiguity_markers
 
@@ -401,9 +404,12 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
     if gencode_reference_gtf:
         print(f"Adding gencode overlapping gene names...", file=sys.stderr)
         gencode_field_val_dict = get_gtf_field_val_dict(gencode_reference_gtf)
+        print(f"Assigning overlapping genes...", file=sys.stderr)
         gene_assignments, ambiguity_markers = get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict)
         col_df["gencode_overlap_gene_assignments"] = gene_assignments
         col_df["is_gencode_gene_overlap_ambiguous"] = ambiguity_markers
+        print(f"Num overlap assignments: {len([n for n in gene_assignments if not n.startswith('STRG')])}", file=sys.stderr)
+        print(f"Num ambiguous assignments: {len(np.where(ambiguity_markers == True)[0])}", file=sys.stderr)
         print("Done!", file=sys.stderr)
 
     # Assign the data to our anndata object:
