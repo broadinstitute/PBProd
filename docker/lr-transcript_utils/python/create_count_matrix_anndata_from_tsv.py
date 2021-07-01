@@ -126,7 +126,7 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
             (((gencode_starts <= start) & (start <= gencode_ends)) |
              ((gencode_starts <= end) & (end <= gencode_ends)) |
              ((start <= gencode_starts) & (gencode_ends <= end)))
-        )
+        )[0]
 
         # If we have some overlaps, then we need to mark them:
         if np.any(gencode_overlapping_indices):
