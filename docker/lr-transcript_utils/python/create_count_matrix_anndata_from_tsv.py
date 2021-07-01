@@ -157,8 +157,8 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
 
                 # DEBUGGING:
                 print(f"Genes overlapping [{k} @ {contig}:{start}-{end}]:")
-                for j in gencode_overlapping_indices:
-                    key = gencode_index_name_map[j]
+                for j in range(len(gencode_overlapping_indices)):
+                    key = gencode_index_name_map[gencode_overlapping_indices[j]]
                     c = gencode_field_val_dict[key][CONTIG_FIELD]
                     s = gencode_field_val_dict[key][START_FIELD]
                     e = gencode_field_val_dict[key][END_FIELD]
