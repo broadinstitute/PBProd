@@ -156,8 +156,9 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
 
                 is_ambiguous = (min(overlap_scores) / max(overlap_scores) > overlap_threshold) if len(gencode_overlapping_indices) > 1 else False
 
+                ####################################
                 # DEBUGGING:
-                print(f"Genes overlapping [{k} @ {contig}:{start}-{end}] [ambiguous: {is_ambiguous}]:")
+                print(f"Genes overlapping [{i}:{k} @ {contig}:{start}-{end}] [ambiguous: {is_ambiguous}]:")
                 for j in range(len(gencode_overlapping_indices)):
                     key = gencode_index_name_map[gencode_overlapping_indices[j]]
                     c = gencode_field_val_dict[key][CONTIG_FIELD]
@@ -167,6 +168,7 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
                     best_string = "***" * 2 if j == max_gencode_index else ""
 
                     print(f"\t{j}\t{gencode_overlapping_indices[j]}\t{key}\t{gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]} @ {c}:{s}-{e} ({overlap_scores[j]}){best_string}")
+                ####################################
 
                 # Set our gene as the one with the most overlap:
                 key = gencode_index_name_map[gencode_overlapping_indices[max_gencode_index]]
