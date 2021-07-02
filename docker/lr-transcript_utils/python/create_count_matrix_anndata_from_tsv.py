@@ -143,16 +143,15 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
             if np.any(gencode_overlapping_indices):
 
                 max_gencode_index = 0
-                overlap_fractions = np.zeros(len(gencode_overlapping_indices))
+                overlap_scores = np.zeros(len(gencode_overlapping_indices))
                 for j, overlap_index in enumerate(gencode_overlapping_indices):
                     # Determine the amount of overlap in the two ranges:
                     overlap_start = max(start, gencode_starts[overlap_index])
                     overlap_end = min(end, gencode_ends[overlap_index])
-                    overlap_fractions[j] = (overlap_end - overlap_start) / \
-                                           (gencode_ends[overlap_index] - gencode_starts[overlap_index])
+                    overlap_scores[j] = (overlap_end - overlap_start)
 
                     # Store the max here to make it a little faster:
-                    if overlap_fractions[j] > overlap_fractions[max_gencode_index]:
+                    if overlap_scores[j] > overlap_scores[max_gencode_index]:
                         max_gencode_index = j
 
                 # DEBUGGING:
@@ -165,12 +164,12 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
 
                     best_string = "***" * 2 if j == max_gencode_index else ""
 
-                    print(f"\t{j}\t{key}\t{gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]} @ {c}:{s}-{e} ({overlap_fractions[j]}){best_string}")
+                    print(f"\t{j}\t{gencode_overlapping_indices[j]}\t{key}\t{gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD]} @ {c}:{s}-{e} ({overlap_scores[j]}){best_string}")
 
                 # Set our gene as the one with the most overlap:
                 key = gencode_index_name_map[gencode_overlapping_indices[max_gencode_index]]
                 gene_assignments.append(gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD])
-                ambiguity_markers[i] = (min(overlap_fractions) / max(overlap_fractions) > overlap_threshold) if len(gencode_overlapping_indices) > 1 else False
+                ambiguity_markers[i] = (min(overlap_scores) / max(overlap_scores) > overlap_threshold) if len(gencode_overlapping_indices) > 1 else False
             else:
                 # We have no existing transcripts for which to add annotations.
                 # We must add the label of the de-novo gene name and mark as unambiguous:
