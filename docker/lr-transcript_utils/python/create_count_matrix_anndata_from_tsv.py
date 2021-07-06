@@ -441,6 +441,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
             indx = np.where(de_novo_transcript_ids == tx)[0]
             if len(indx) > 1:
                 raise RuntimeError(f"Error: transcript appears more than once: {tx} ({i}): {indx}")
+            indx = indx[0]
             print(f"TX Assignment: {tx} ({i}): {indx} - {raw_gene_assignments[i]}", file=sys.stderr)
             gene_assignments[indx] = raw_gene_assignments[i]
             ambiguity_markers[indx] = raw_ambiguity_markers[i]
@@ -453,9 +454,6 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
 
     # Assign the data to our anndata object:
     count_adata.var = col_df
-
-    # DEBUGGING:
-    col_df.to_csv("col_df.tsv", sep="\t")
 
     if is_gencode:
         count_adata.var_names = transcript_names
