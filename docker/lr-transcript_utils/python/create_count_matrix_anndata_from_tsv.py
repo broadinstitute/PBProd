@@ -435,13 +435,13 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
         raw_gene_assignments, raw_ambiguity_markers = get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict)
 
         # Reorder by tx_id:
-        gene_assignments = np.zeros(len(raw_gene_assignments))
+        gene_assignments = [None] * len(raw_gene_assignments)
         ambiguity_markers = np.zeros(len(raw_ambiguity_markers))
         for i, tx in enumerate(gtf_field_dict.keys()):
             indx = np.where(de_novo_transcript_ids == tx)[0]
             if len(indx) > 1:
                 raise RuntimeError(f"Error: transcript appears more than once: {tx} ({i}): {indx}")
-            print(f"TX Assignmet: {tx} ({i}): {indx} - {raw_gene_assignments[i]}", file=sys.stderr)
+            print(f"TX Assignment: {tx} ({i}): {indx} - {raw_gene_assignments[i]}", file=sys.stderr)
             gene_assignments[indx] = raw_gene_assignments[i]
             ambiguity_markers[indx] = raw_ambiguity_markers[i]
 
