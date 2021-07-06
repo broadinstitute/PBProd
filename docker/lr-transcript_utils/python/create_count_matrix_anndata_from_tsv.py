@@ -436,7 +436,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
 
         # Reorder by tx_id:
         gene_assignments = [None] * len(raw_gene_assignments)
-        ambiguity_markers = np.zeros(len(raw_ambiguity_markers))
+        ambiguity_markers = np.empty(len(raw_ambiguity_markers), dype=bool)
         for i, tx in enumerate(gtf_field_dict.keys()):
             indx = np.where(de_novo_transcript_ids == tx)[0]
             if len(indx) > 1:
