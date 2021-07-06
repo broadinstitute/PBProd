@@ -180,6 +180,8 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
                 gene_assignments.append(v[GENE_ID_FIELD])
                 ambiguity_markers[i] = False
 
+            print(f"Assigned: {k} -> {gene_assignments[i]} (ambiguous: {ambiguity_markers[i]})")
+
             pbar.update(1)
 
     gene_assignments = np.array(gene_assignments)
