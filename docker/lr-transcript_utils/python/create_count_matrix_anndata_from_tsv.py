@@ -447,7 +447,7 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
             if len(indx) > 1:
                 raise RuntimeError(f"Error: transcript appears more than once: {tx} ({i}): {indx}")
             indx = indx[0]
-            print(f"TX Assignment: {tx} ({i}): {indx} - {raw_overlap_gene_names[i]}", file=sys.stderr)
+            print(f"TX Assignment: {tx} ({i}): {indx} - {raw_overlap_gene_names[i]} <{raw_overlap_gene_ids[i]}>", file=sys.stderr)
             overlap_gene_names[indx] = raw_overlap_gene_names[i]
             overlap_gene_ids[indx] = raw_overlap_gene_ids[i]
             ambiguity_markers[indx] = raw_ambiguity_markers[i]
