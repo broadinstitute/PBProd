@@ -115,7 +115,8 @@ def interval_overlaps_any_in_interval_list(contig, start, end, interval_list):
 
 
 def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict, overlap_threshold=0.1):
-    gene_assignments = []
+    gene_name_assignments = []
+    gene_id_assignments = []
     ambiguity_markers = np.empty(len(gtf_field_dict), dtype=bool)
 
     # Make structures here that will allow fast search:
@@ -172,20 +173,23 @@ def get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_d
 
                 # Set our gene as the one with the most overlap:
                 key = gencode_index_name_map[gencode_overlapping_indices[max_gencode_index]]
-                gene_assignments.append(gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD])
+                gene_name_assignments.append(gencode_field_val_dict[key][GENCODE_GENE_NAME_FIELD])
+                gene_id_assignments.append(gencode_field_val_dict[key][GENE_ID_FIELD])
                 ambiguity_markers[i] = is_ambiguous
             else:
                 # We have no existing transcripts for which to add annotations.
                 # We must add the label of the de-novo gene name and mark as unambiguous:
-                gene_assignments.append(v[GENE_ID_FIELD])
+                gene_name_assignments.append(v[GENE_ID_FIELD])
+                gene_id_assignments.append(v[GENE_ID_FIELD])
                 ambiguity_markers[i] = False
 
-            print(f"Assigned: {k} -> {gene_assignments[i]} (ambiguous: {ambiguity_markers[i]})")
-
+            print(f"Assigned: {k} -> {gene_name_assignments[i]}<{gene_id_assignments[i]}>  (ambiguous: {ambiguity_markers[i]})")
             pbar.update(1)
 
-    gene_assignments = np.array(gene_assignments)
-    return gene_assignments, ambiguity_markers
+    gene_name_assignments = np.array(gene_name_assignments)
+    gene_id_assignments = np.array(gene_id_assignments)
+
+    return gene_name_assignments, gene_id_assignments, ambiguity_markers
 
 
 def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
@@ -432,23 +436,26 @@ def create_combined_anndata(input_tsv, gtf_field_dict, overlap_intervals=None,
         print(f"Adding gencode overlapping gene names...", file=sys.stderr)
         gencode_field_val_dict = get_gtf_field_val_dict(gencode_reference_gtf, entry_type_filter=GENE_ENTRY_STRING)
         print(f"Assigning overlapping genes...", file=sys.stderr)
-        raw_gene_assignments, raw_ambiguity_markers = get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict)
+        raw_overlap_gene_names, raw_overlap_gene_ids, raw_ambiguity_markers = get_approximate_gencode_gene_assignments(gtf_field_dict, gencode_field_val_dict)
 
         # Reorder by tx_id:
-        gene_assignments = [None] * len(raw_gene_assignments)
+        overlap_gene_names = [None] * len(raw_overlap_gene_names)
+        overlap_gene_ids = [None] * len(raw_overlap_gene_ids)
         ambiguity_markers = np.empty(len(raw_ambiguity_markers), dtype=bool)
         for i, tx in enumerate(gtf_field_dict.keys()):
             indx = np.where(de_novo_transcript_ids == tx)[0]
             if len(indx) > 1:
                 raise RuntimeError(f"Error: transcript appears more than once: {tx} ({i}): {indx}")
             indx = indx[0]
-            print(f"TX Assignment: {tx} ({i}): {indx} - {raw_gene_assignments[i]}", file=sys.stderr)
-            gene_assignments[indx] = raw_gene_assignments[i]
+            print(f"TX Assignment: {tx} ({i}): {indx} - {raw_overlap_gene_names[i]}", file=sys.stderr)
+            overlap_gene_names[indx] = raw_overlap_gene_names[i]
+            overlap_gene_ids[indx] = raw_overlap_gene_ids[i]
             ambiguity_markers[indx] = raw_ambiguity_markers[i]
 
-        col_df["gencode_overlap_gene_assignments"] = gene_assignments
+        col_df["gencode_overlap_gene_names"] = overlap_gene_names
+        col_df["gencode_overlap_gene_ids"] = overlap_gene_ids
         col_df["is_gencode_gene_overlap_ambiguous"] = ambiguity_markers
-        print(f"Num overlap assignments: {len([n for n in gene_assignments if not n.startswith('STRG')])}", file=sys.stderr)
+        print(f"Num overlap assignments: {len([n for n in overlap_gene_names if not n.startswith('STRG')])}", file=sys.stderr)
         print(f"Num ambiguous assignments: {len(np.where(ambiguity_markers == True)[0])}", file=sys.stderr)
         print("Done!", file=sys.stderr)
 
