@@ -12,6 +12,8 @@ import "tasks/Ten_X_Tool.wdl" as TENX
 import "tasks/JupyterNotebooks.wdl" as JUPYTER
 import "tasks/Longbow.wdl" as LONGBOW
 
+import "tasks/StringTie2.wdl"
+
 import "tasks/TranscriptAnalysis/UMI_Tools.wdl" as UMI_TOOLS
 import "tasks/TranscriptAnalysis/Postprocessing_Tasks.wdl" as TX_POST
 
@@ -446,28 +448,11 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 prefix = SM + "_ArrayElements_Coding_Regions_Only"
         }
 
-        # Align our array elements:
-        call AR.Minimap2 as t_32_AlignArrayElementsToTranscriptome {
-            input:
-                reads      = [ t_31_ExtractCodingRegionsFromArrayElements.extracted_reads ],
-                ref_fasta  = transcriptome_ref_fasta,
-                map_preset = "asm20"
-        }
-
         call AR.Minimap2 as t_33_AlignArrayElementsToGenome {
             input:
                 reads      = [ t_31_ExtractCodingRegionsFromArrayElements.extracted_reads ],
                 ref_fasta  = ref_fasta,
                 map_preset = "splice:hq"
-        }
-
-        # We need to restore the annotations we created with the 10x tool to the aligned reads.
-        call TENX.RestoreAnnotationstoAlignedBam as t_34_RestoreAnnotationsToTranscriptomeAlignedBam {
-            input:
-                annotated_bam_file = t_31_ExtractCodingRegionsFromArrayElements.extracted_reads,
-                aligned_bam_file = t_32_AlignArrayElementsToTranscriptome.aligned_bam,
-                tags_to_ignore = [],
-                mem_gb = 64,  # TODO: Debug for memory redution
         }
 
         # We need to restore the annotations we created with the 10x tool to the aligned reads.
@@ -477,38 +462,6 @@ workflow PB10xMasSeqSingleFlowcellv2 {
                 aligned_bam_file = t_33_AlignArrayElementsToGenome.aligned_bam,
                 tags_to_ignore = [],
                 mem_gb = 64,  # TODO: Debug for memory redution
-        }
-
-        # To properly count our transcripts we must throw away the non-primary and unaligned reads:
-        RuntimeAttr filterReadsAttrs = object {
-            cpu_cores: 4,
-            preemptible_tries: 0
-        }
-        call Utils.FilterReadsBySamFlags as t_36_RemoveUnmappedAndNonPrimaryReads {
-            input:
-                bam = t_34_RestoreAnnotationsToTranscriptomeAlignedBam.output_bam,
-                sam_flags = "2308",
-                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly",
-                runtime_attr_override = filterReadsAttrs
-        }
-
-        # Filter reads with no UMI tag:
-        call Utils.FilterReadsWithTagValues as t_37_FilterReadsWithNoUMI {
-            input:
-                bam = t_36_RemoveUnmappedAndNonPrimaryReads.output_bam,
-                tag = "ZU",
-                value_to_remove = ".",
-                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs",
-                runtime_attr_override = filterReadsAttrs
-        }
-
-        # Copy the contig to a tag.
-        # By this point in the pipeline, array elements are aligned to a transcriptome, so this tag will
-        # actually indicate the transcript to which each array element aligns.
-        call TENX.CopyContigNameToReadTag as t_38_CopyContigNameToReadTag {
-            input:
-                aligned_bam_file = t_37_FilterReadsWithNoUMI.output_bam,
-                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs"
         }
     }
 
@@ -580,16 +533,91 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         cpu_cores: 4
     }
     call Utils.MergeBams as t_51_MergeLongbowExtractedArrayElements { input: bams = t_31_ExtractCodingRegionsFromArrayElements.extracted_reads, prefix = SM + "_array_elements_longbow_extracted" }
-    call Utils.MergeBams as t_52_MergeTranscriptomeAlignedExtractedArrayElements { input: bams = t_34_RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
     call Utils.MergeBams as t_53_MergeGenomeAlignedExtractedArrayElements { input: bams = t_35_RestoreAnnotationsToGenomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_genome_aligned", runtime_attr_override = merge_extra_cpu_attrs }
-    call Utils.MergeBams as t_54_MergePrimaryTranscriptomeAlignedArrayElements { input: bams = t_38_CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments", runtime_attr_override = merge_extra_cpu_attrs }
 
-    # NEW PB INDEXING IS BEING DIFFICULT.  REMOVED FOR NOW.
-#    # PbIndex some key files:
-#    call PB.PBIndex as PbIndexPrimaryTranscriptomeAlignedArrayElements {
-#        input:
-#            bam = MergePrimaryTranscriptomeAlignedArrayElements.merged_bam
-#    }
+    # We must discover the transcriptome for this new sample.
+    # We only do this if we don't have SIRV data:
+    if ( !is_SIRV_data ) {
+        call StringTie2.Quantify as t_74_ST2_Quant {
+            input:
+                aligned_bam = t_53_MergeGenomeAlignedExtractedArrayElements.merged_bam,
+                aligned_bai = t_53_MergeGenomeAlignedExtractedArrayElements.merged_bai,
+                gtf = genome_annotation_gtf,
+                keep_retained_introns = false,
+                prefix = SM + "_StringTie2_Quantify",
+        }
+
+        call StringTie2.ExtractTranscriptSequences as t_75_ST2_ExtractTranscriptSequences  {
+            input:
+                ref_fasta = ref_fasta,
+                ref_fasta_fai = ref_fasta_index,
+                gtf = t_74_ST2_Quant.st_gtf,
+                prefix = SM + "_StringTie2_ExtractTranscriptSequences",
+        }
+
+        call StringTie2.CompareTranscriptomes as t_76_ST2_CompareTranscriptomes {
+            input:
+                guide_gtf = genome_annotation_gtf,
+                new_gtf = t_74_ST2_Quant.st_gtf,
+                prefix = SM + "_StringTie2_CompareTranscriptome",
+        }
+    }
+
+    # Set our transcriptome file:
+    File transcriptome_reference_for_quant = if is_SIRV_data then transcriptome_ref_fasta else select_first([t_75_ST2_ExtractTranscriptSequences.transcripts_fa])
+
+    # Now we have to align the array elements to the new transcriptome.
+    scatter (extracted_array_elements in t_31_ExtractCodingRegionsFromArrayElements.extracted_reads) {
+        # Align our array elements:
+        call AR.Minimap2 as t_32_AlignArrayElementsToTranscriptome {
+            input:
+                reads      = [ extracted_array_elements ],
+                ref_fasta  = transcriptome_reference_for_quant,
+                map_preset = "asm20"
+        }
+        # We need to restore the annotations we created with the 10x tool to the aligned reads.
+        call TENX.RestoreAnnotationstoAlignedBam as t_34_RestoreAnnotationsToTranscriptomeAlignedBam {
+            input:
+                annotated_bam_file = extracted_array_elements,
+                aligned_bam_file = t_32_AlignArrayElementsToTranscriptome.aligned_bam,
+                tags_to_ignore = [],
+                mem_gb = 64,  # TODO: Debug for memory redution
+        }
+
+        # To properly count our transcripts we must throw away the non-primary and unaligned reads:
+        RuntimeAttr filterReadsAttrs = object {
+            cpu_cores: 4,
+            preemptible_tries: 0
+        }
+        call Utils.FilterReadsBySamFlags as t_36_RemoveUnmappedAndNonPrimaryReads {
+            input:
+                bam = t_34_RestoreAnnotationsToTranscriptomeAlignedBam.output_bam,
+                sam_flags = "2308",
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly",
+                runtime_attr_override = filterReadsAttrs
+        }
+        # Filter reads with no UMI tag:
+        call Utils.FilterReadsWithTagValues as t_37_FilterReadsWithNoUMI {
+            input:
+                bam = t_36_RemoveUnmappedAndNonPrimaryReads.output_bam,
+                tag = "ZU",
+                value_to_remove = ".",
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs",
+                runtime_attr_override = filterReadsAttrs
+        }
+        # Copy the contig to a tag.
+        # By this point in the pipeline, array elements are aligned to a transcriptome, so this tag will
+        # actually indicate the transcript to which each array element aligns.
+        call TENX.CopyContigNameToReadTag as t_38_CopyContigNameToReadTag {
+            input:
+                aligned_bam_file = t_37_FilterReadsWithNoUMI.output_bam,
+                prefix = SM + "_ArrayElements_Annotated_Aligned_PrimaryOnly_WithUMIs"
+        }
+    }
+
+    # Now we merge together our TX-ome aligned stuff:
+    call Utils.MergeBams as t_52_MergeTranscriptomeAlignedExtractedArrayElements { input: bams = t_34_RestoreAnnotationsToTranscriptomeAlignedBam.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned", runtime_attr_override = merge_extra_cpu_attrs }
+    call Utils.MergeBams as t_54_MergePrimaryTranscriptomeAlignedArrayElements { input: bams = t_38_CopyContigNameToReadTag.output_bam, prefix = SM + "_array_elements_longbow_extracted_tx_aligned_primary_alignments", runtime_attr_override = merge_extra_cpu_attrs }
 
     # Collect metrics on the subreads bam:
     RuntimeAttr subreads_sam_stats_runtime_attrs = object {
@@ -754,6 +782,27 @@ workflow PB10xMasSeqSingleFlowcellv2 {
             keyfile = t_61_GenerateStaticReport.html_report
     }
 
+    ##############################################################################################################
+    # Finalize the discovered transcript:
+    if ( !is_SIRV_data ) {
+        call FF.FinalizeToDir as t_78_FinalizeDiscoveredTranscriptome {
+            input:
+                files = [
+                    select_first([t_74_ST2_Quant.st_gtf]),
+                    select_first([t_75_ST2_ExtractTranscriptSequences.transcripts_fa]),
+                    select_first([t_75_ST2_ExtractTranscriptSequences.transcripts_fai]),
+                    select_first([t_75_ST2_ExtractTranscriptSequences.transcripts_dict]),
+                    select_first([t_76_ST2_CompareTranscriptomes.annotated_gtf]),
+                    select_first([t_76_ST2_CompareTranscriptomes.loci]),
+                    select_first([t_76_ST2_CompareTranscriptomes.stats]),
+                    select_first([t_76_ST2_CompareTranscriptomes.tracking]),
+                    select_first([t_76_ST2_CompareTranscriptomes.refmap]),
+                    select_first([t_76_ST2_CompareTranscriptomes.tmap]),
+                ],
+                outdir = base_out_dir + "/discovered_transcriptome",
+                keyfile = t_61_GenerateStaticReport.html_report
+        }
+    }
     ##############################################################################################################
     # Finalize the intermediate reads files (from raw CCS corrected reads through split array elements)
     call FF.FinalizeToDir as t_63_FinalizeArrayReads {
