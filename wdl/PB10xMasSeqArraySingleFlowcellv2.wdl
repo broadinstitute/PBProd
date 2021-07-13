@@ -563,8 +563,10 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         }
     }
 
-    # Set our transcriptome file:
+    # Set our transcriptome files:
     File transcriptome_reference_for_quant = if is_SIRV_data then transcriptome_ref_fasta else select_first([t_75_ST2_ExtractTranscriptSequences.transcripts_fa])
+    File transcriptome_reference_index_for_quant = if is_SIRV_data then transcriptome_ref_fasta_index else select_first([t_75_ST2_ExtractTranscriptSequences.transcripts_fai])
+    File transcriptome_reference_dict_for_quant = if is_SIRV_data then transcriptome_ref_fasta_dict else select_first([t_75_ST2_ExtractTranscriptSequences.transcripts_dict])
 
     # Now we have to align the array elements to the new transcriptome.
     scatter (extracted_array_elements in t_31_ExtractCodingRegionsFromArrayElements.extracted_reads) {
@@ -692,7 +694,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         input:
             bam_file = t_52_MergeTranscriptomeAlignedExtractedArrayElements.merged_bam,
             bam_index = t_52_MergeTranscriptomeAlignedExtractedArrayElements.merged_bai,
-            ref_dict = transcriptome_ref_fasta_dict,
+            ref_dict = transcriptome_reference_dict_for_quant,
 
             base_metrics_out_dir = metrics_out_dir + "/transcriptome_aligned_array_element_metrics"
     }
