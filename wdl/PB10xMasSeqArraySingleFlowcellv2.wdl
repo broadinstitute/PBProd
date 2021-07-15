@@ -660,7 +660,8 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         call TX_POST.CreateCountMatrixAnndataFromTsv as t_58_CreateCountMatrixAnndataFromTsv {
             input:
                 count_matrix_tsv = t_57_CreateCountMatrixFromAnnotatedBam.count_matrix,
-                gencode_gtf_file = genome_annotation_gtf,
+                genome_annotation_gtf_file = select_first([t_74_ST2_Quant.st_gtf]),
+                gencode_reference_gtf_file = genome_annotation_gtf,
                 overlap_intervals = intervals_of_interest,
                 overlap_interval_label = interval_overlap_name,
                 prefix = "~{SM}_~{ID}_gene_tx_expression_count_matrix"

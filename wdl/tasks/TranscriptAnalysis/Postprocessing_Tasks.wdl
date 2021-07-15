@@ -113,27 +113,31 @@ task CreateCountMatrixAnndataFromTsv {
 
     input {
         File count_matrix_tsv
-        File gencode_gtf_file
+        File genome_annotation_gtf_file
+
         String prefix = "umi_tools_group"
 
         File? overlap_intervals
         String? overlap_interval_label
+        File? gencode_reference_gtf_file
 
         RuntimeAttr? runtime_attr_override
     }
 
-    Int disk_size_gb = 10 + 4*ceil(size(count_matrix_tsv, "GB")) + 4*ceil(size(gencode_gtf_file, "GB"))
+    Int disk_size_gb = 20 + 4*ceil(size(count_matrix_tsv, "GB")) + 4*ceil(size(genome_annotation_gtf_file, "GB"))
 
     String overlap_intervals_arg = if defined(overlap_intervals)  then " --overlap-intervals " else ""
     String overlap_interval_label_arg = if defined(overlap_interval_label) then " --overlap-interval-label " else ""
+    String gencode_reference_gtf_file_arg = if defined(gencode_reference_gtf_file) then " --gencode-reference-gtf " else ""
 
     command <<<
         set -euxo pipefail
         /python_scripts/create_count_matrix_anndata_from_tsv.py \
             -t ~{count_matrix_tsv} \
-            -g ~{gencode_gtf_file} \
+            -g ~{genome_annotation_gtf_file} \
             ~{overlap_intervals_arg}~{default="" sep=" --overlap-intervals " overlap_intervals} \
             ~{overlap_interval_label_arg}~{default="" sep=" --overlap-interval-label " overlap_interval_label} \
+            ~{gencode_reference_gtf_file_arg}~{default="" sep=" --gencode-reference-gtf " gencode_reference_gtf_file} \
             -o ~{prefix}
     >>>
 
