@@ -264,7 +264,7 @@ workflow PB10xMasSeqSingleFlowcellv2 {
         call Utils.MergeBams as t_16_MergeLongbowS2EPassedReads {
             input:
                 bams = [t_14_FilterS2ECCSReads.passed_reads, t_15_FilterS2EReclaimableReads.passed_reads],
-                prefix = SM + "_LongbowFilter_Failed_1"
+                prefix = SM + "_LongbowFilter_Passed_1"
         }
         call Utils.MergeBams as t_17_MergeLongbowS2EFailedReads {
             input:

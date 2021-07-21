@@ -399,7 +399,7 @@ task CountBamRecords {
     Int disk_size = 1 + ceil(2 * size(bam, "GiB"))
 
     command <<<
-        samtools view ~{bam} | wc -l
+        samtools view -c ~{bam}
     >>>
 
     output {

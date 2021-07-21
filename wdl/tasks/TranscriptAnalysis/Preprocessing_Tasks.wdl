@@ -46,3 +46,44 @@ task SplitBamBySampleAndCellBarcodeTask {
         cpu: 8
     }
 }
+
+task DownsampleToIsoSeqEquivalent {
+
+    meta {
+        description : "Downsample a given MAS-seq array element bam file into one containing only 1 read per ZMW (equivalent to IsoSeq)."
+        author : "Jonn Smith"
+        email : "jonn@broadinstitute.org"
+    }
+
+    input {
+        File array_element_bam
+        String prefix = "downsampled_masseq"
+    }
+
+    parameter_meta {
+        array_element_bam : "Bam file containing aligned reads that have been annotated with the 10x tool."
+        prefix : "[optional] base name to give to every output file.  Should correspond to some unique identifier from this dataset."
+    }
+
+    Int disk_size = 10 + 20 * ceil(size(array_element_bam, "GB"))
+
+    String out_name = sub(array_element_bam, ".bam$", ".ZMW_downsampled.bam")
+
+    command {
+        /python_scripts/downsample_masseq_by_zmw.py ~{array_element_bam}
+        mv ~{out_name} ~{prefix}.bam
+    }
+
+    output {
+        File downsampled_bam = "${prefix}.bam"
+    }
+
+    runtime {
+        docker: "us.gcr.io/broad-dsp-lrma/lr-transcript_utils:0.0.6"
+        memory: 16 + " GiB"
+        disks: "local-disk " + disk_size + " HDD"
+        boot_disk_gb: 10
+        preemptible: 0
+        cpu: 2
+    }
+}
